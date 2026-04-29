@@ -9,6 +9,7 @@ pub const factory = @import("factory.zig");
 pub const rest = @import("rest.zig");
 pub const jsonrpc = @import("jsonrpc.zig");
 pub const client = @import("client.zig");
+pub const push_config_compat = @import("push_config_compat.zig");
 
 pub const Transport = transport.Transport;
 pub const TransportFactory = transport.TransportFactory;
@@ -38,4 +39,5 @@ test {
     _ = rest;
     _ = jsonrpc;
     _ = client;
+    _ = push_config_compat;
 }
