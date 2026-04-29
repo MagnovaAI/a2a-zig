@@ -19,6 +19,7 @@
 //!   GET  /extendedAgentCard                              -> getExtendedAgentCard
 const std = @import("std");
 const a2a = @import("a2a");
+const pb = @import("pb");
 const httpz = @import("httpz");
 
 const handler_mod = @import("handler.zig");
@@ -35,9 +36,10 @@ pub const Handler = struct {
     inner: RequestHandler,
     /// Long-lived allocator for SSE streams that must outlive the per-request arena.
     allocator: std.mem.Allocator,
+    io: std.Io,
 
-    pub fn init(allocator: std.mem.Allocator, inner: RequestHandler) Handler {
-        return .{ .allocator = allocator, .inner = inner };
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, inner: RequestHandler) Handler {
+        return .{ .allocator = allocator, .inner = inner, .io = io };
     }
 
     pub fn action(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
@@ -120,17 +122,12 @@ pub const Handler = struct {
         res: *httpz.Response,
     ) !void {
         const body = req.body() orelse return writeError(res, 400, "missing body");
-        var parsed = std.json.parseFromSlice(std.json.Value, arena, body, .{}) catch {
-            return writeError(res, 400, "invalid JSON");
-        };
-        defer parsed.deinit();
-        const sm_req = a2a.SendMessageRequest.jsonParseFromValue(arena, parsed.value, .{}) catch {
+        const sm_req = decodeProtoBody(arena, body, pb.v1.SendMessageRequest, pb.conv.sendMessageRequestFromProto) catch
             return writeError(res, 400, "invalid SendMessageRequest");
-        };
         var resp = self.inner.sendMessage(arena, params, sm_req) catch |err|
             return writeRestHandlerError(res, err);
         defer resp.deinit();
-        try writeJsonValue(res, 200, resp);
+        try writeProtoBody(arena, res, 200, resp, pb.conv.sendMessageResponseToProto);
     }
 
     fn handleSendStreaming(
@@ -141,13 +138,8 @@ pub const Handler = struct {
         res: *httpz.Response,
     ) !void {
         const body = req.body() orelse return writeError(res, 400, "missing body");
-        var parsed = std.json.parseFromSlice(std.json.Value, arena, body, .{}) catch {
-            return writeError(res, 400, "invalid JSON");
-        };
-        defer parsed.deinit();
-        const sm_req = a2a.SendMessageRequest.jsonParseFromValue(arena, parsed.value, .{}) catch {
+        const sm_req = decodeProtoBody(arena, body, pb.v1.SendMessageRequest, pb.conv.sendMessageRequestFromProto) catch
             return writeError(res, 400, "invalid SendMessageRequest");
-        };
         var iter = self.inner.sendStreamingMessage(arena, params, sm_req) catch |err|
             return writeRestHandlerError(res, err);
 
@@ -155,7 +147,7 @@ pub const Handler = struct {
             iter.deinit();
             return writeError(res, 500, "alloc stream source");
         };
-        source.* = .{ .allocator = self.allocator, .iterator = iter };
+        source.* = .{ .allocator = self.allocator, .io = self.io, .iterator = iter };
         try res.startEventStream(source, sse_mod.writeStream);
     }
 
@@ -175,7 +167,7 @@ pub const Handler = struct {
         var resp = self.inner.listTasks(arena, params, lt_req) catch |err|
             return writeRestHandlerError(res, err);
         defer resp.deinit();
-        try writeJsonValue(res, 200, resp);
+        try writeProtoBody(arena, res, 200, resp, pb.conv.listTasksResponseToProto);
         // ownership of the request was claimed by the handler (defer above is a no-op then)
         lt_req = .{ .allocator = arena }; // already deinit'd by handler
     }
@@ -194,7 +186,7 @@ pub const Handler = struct {
         var task = self.inner.getTask(arena, params, gt_req) catch |err|
             return writeRestHandlerError(res, err);
         defer task.deinit();
-        try writeJsonValue(res, 200, task);
+        try writeProtoBody(arena, res, 200, task, pb.conv.taskToProto);
     }
 
     fn handleCancelTask(
@@ -212,7 +204,7 @@ pub const Handler = struct {
         var task = self.inner.cancelTask(arena, params, ct_req) catch |err|
             return writeRestHandlerError(res, err);
         defer task.deinit();
-        try writeJsonValue(res, 200, task);
+        try writeProtoBody(arena, res, 200, task, pb.conv.taskToProto);
     }
 
     fn handleSubscribe(
@@ -232,7 +224,7 @@ pub const Handler = struct {
             iter.deinit();
             return writeError(res, 500, "alloc stream source");
         };
-        source.* = .{ .allocator = self.allocator, .iterator = iter };
+        source.* = .{ .allocator = self.allocator, .io = self.io, .iterator = iter };
         try res.startEventStream(source, sse_mod.writeStream);
     }
 
@@ -258,7 +250,7 @@ pub const Handler = struct {
         var resp = self.inner.createPushConfig(arena, params, create_req) catch |err|
             return writeRestHandlerError(res, err);
         defer resp.deinit();
-        try writeJsonValue(res, 200, resp);
+        try writeProtoBody(arena, res, 200, resp, pb.conv.taskPushNotificationConfigToProto);
     }
 
     fn handleListPushConfigs(
@@ -279,7 +271,7 @@ pub const Handler = struct {
         var resp = self.inner.listPushConfigs(arena, params, list_req) catch |err|
             return writeRestHandlerError(res, err);
         defer resp.deinit();
-        try writeJsonValue(res, 200, resp);
+        try writeProtoBody(arena, res, 200, resp, pb.conv.listTaskPushNotificationConfigsResponseToProto);
     }
 
     fn handleGetPushConfig(
@@ -298,7 +290,7 @@ pub const Handler = struct {
         var resp = self.inner.getPushConfig(arena, params, get_req) catch |err|
             return writeRestHandlerError(res, err);
         defer resp.deinit();
-        try writeJsonValue(res, 200, resp);
+        try writeProtoBody(arena, res, 200, resp, pb.conv.taskPushNotificationConfigToProto);
     }
 
     fn handleDeletePushConfig(
@@ -329,9 +321,48 @@ pub const Handler = struct {
         var card = self.inner.getExtendedAgentCard(arena, params, empty) catch |err|
             return writeRestHandlerError(res, err);
         defer card.deinit();
-        try writeJsonValue(res, 200, card);
+        try writeProtoBody(arena, res, 200, card, pb.conv.agentCardToProto);
     }
 };
+
+// ---- Proto-JSON codec helpers ----
+
+fn decodeProtoBody(
+    arena: std.mem.Allocator,
+    body: []const u8,
+    comptime ProtoT: type,
+    comptime fromProto: anytype,
+) !ReturnPayload(@TypeOf(fromProto)) {
+    const parsed = try ProtoT.jsonDecode(body, .{}, arena);
+    defer parsed.deinit();
+    return try fromProto(arena, parsed.value);
+}
+
+fn ReturnPayload(comptime FnT: type) type {
+    const info = @typeInfo(FnT).@"fn".return_type.?;
+    return @typeInfo(info).error_union.payload;
+}
+
+fn writeProtoBody(
+    arena: std.mem.Allocator,
+    res: *httpz.Response,
+    status: u16,
+    value: anytype,
+    comptime toProto: anytype,
+) !void {
+    var pb_value = toProto(arena, value) catch {
+        res.status = 500;
+        return;
+    };
+    defer pb_value.deinit(arena);
+    const json = pb_value.jsonEncode(.{}, .{}, arena) catch {
+        res.status = 500;
+        return;
+    };
+    res.status = status;
+    res.content_type = httpz.ContentType.JSON;
+    res.body = json;
+}
 
 // ---------------------------------------------------------------------------
 // Query string parsers

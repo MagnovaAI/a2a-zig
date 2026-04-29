@@ -37,6 +37,8 @@ pub const JsonRpcTransport = struct {
     endpoint: []const u8,
     /// Hard cap on a single response body, default 8 MiB.
     max_response_bytes: usize = 8 * 1024 * 1024,
+    /// Set when `transport()` is called; freed alongside `self` in `destroy`.
+    wrapper: ?*Transport = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, endpoint: []const u8) !*JsonRpcTransport {
         const self = try allocator.create(JsonRpcTransport);
@@ -54,12 +56,14 @@ pub const JsonRpcTransport = struct {
         self.client.deinit();
         self.allocator.free(self.endpoint);
         const a = self.allocator;
+        if (self.wrapper) |w| a.destroy(w);
         a.destroy(self);
     }
 
     pub fn transport(self: *JsonRpcTransport) *Transport {
         const out = self.allocator.create(Transport) catch unreachable;
         out.* = .{ .ctx = @ptrCast(self), .vtable = &vtable };
+        self.wrapper = out;
         return out;
     }
 

@@ -39,6 +39,8 @@ pub const RestTransport = struct {
     base_url: []const u8,
     /// Hard cap on a single response body, default 8 MiB.
     max_response_bytes: usize = 8 * 1024 * 1024,
+    /// Set when `transport()` is called; freed alongside `self` in `destroy`.
+    wrapper: ?*Transport = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io, base_url: []const u8) !*RestTransport {
         const self = try allocator.create(RestTransport);
@@ -58,6 +60,7 @@ pub const RestTransport = struct {
         self.client.deinit();
         self.allocator.free(self.base_url);
         const a = self.allocator;
+        if (self.wrapper) |w| a.destroy(w);
         a.destroy(self);
     }
 
@@ -66,6 +69,7 @@ pub const RestTransport = struct {
     pub fn transport(self: *RestTransport) *Transport {
         const out = self.allocator.create(Transport) catch unreachable;
         out.* = .{ .ctx = @ptrCast(self), .vtable = &vtable };
+        self.wrapper = out;
         return out;
     }
 
@@ -121,7 +125,8 @@ pub const RestTransport = struct {
         payload: ?[]const u8,
     ) ![]u8 {
         var body: std.Io.Writer.Allocating = .init(request_allocator);
-        errdefer body.deinit();
+        var owned = false;
+        defer if (!owned) body.deinit();
 
         const result = self.client.fetch(.{
             .location = .{ .url = url },
@@ -132,20 +137,18 @@ pub const RestTransport = struct {
             .keep_alive = false,
         }) catch |err| {
             log.err("REST fetch failed: method={s} url={s} err={s}", .{ @tagName(method), url, @errorName(err) });
-            body.deinit();
             return RestError.HttpRequestFailed;
         };
 
         const status = @intFromEnum(result.status);
         if (status < 200 or status >= 300) {
             log.err("REST status error: method={s} url={s} status={d}", .{ @tagName(method), url, status });
-            body.deinit();
             return RestError.HttpStatusError;
         }
         if (body.written().len > self.max_response_bytes) {
-            body.deinit();
             return RestError.InvalidResponse;
         }
+        owned = true;
         return body.toOwnedSlice();
     }
 

@@ -30,8 +30,14 @@ const RequestHandler = handler_mod.RequestHandler;
 const AgentCardProducer = agent_card_mod.AgentCardProducer;
 
 pub const Bind = struct {
-    host: []const u8 = "127.0.0.1",
+    /// IPv4 address octets. Defaults to 127.0.0.1.
+    host: [4]u8 = .{ 127, 0, 0, 1 },
     port: u16 = 8080,
+
+    /// Bind to all interfaces on the given port.
+    pub fn allInterfaces(port: u16) Bind {
+        return .{ .host = .{ 0, 0, 0, 0 }, .port = port };
+    }
 };
 
 pub const Mounts = struct {
@@ -63,8 +69,15 @@ pub const Dispatch = struct {
     card: agent_card_mod.Handler,
     mounts: Mounts,
 
-    pub fn dispatch(self: *Dispatch, _: httpz.Action(*Dispatch), req: *httpz.Request, res: *httpz.Response) !void {
-        // Route: agent card path takes precedence so it can sit above `/`.
+    /// httpz dispatcher signature: `(handler, action, req, res)`. We
+    /// ignore `action` because we mount a single catch-all route and
+    /// route internally based on the path.
+    pub fn dispatch(
+        self: *Dispatch,
+        _: httpz.Action(*Dispatch),
+        req: *httpz.Request,
+        res: *httpz.Response,
+    ) !void {
         if (std.mem.eql(u8, req.url.path, self.mounts.agent_card_path)) {
             return self.card.action(req, res);
         }
@@ -78,6 +91,10 @@ pub const Dispatch = struct {
         res.body = "{\"error\":{\"code\":404,\"message\":\"not found\"}}";
         res.content_type = httpz.ContentType.JSON;
     }
+
+    /// Placeholder action registered with the router. The real dispatch
+    /// happens in `Dispatch.dispatch` above.
+    fn passthrough(_: *Dispatch, _: *httpz.Request, _: *httpz.Response) !void {}
 
     fn isRestPath(path: []const u8) bool {
         return std.mem.eql(u8, path, "/message:send") or
@@ -102,14 +119,14 @@ pub const Server = struct {
         const dispatch = try allocator.create(Dispatch);
         errdefer allocator.destroy(dispatch);
         dispatch.* = .{
-            .rpc = jsonrpc_mod.Handler.init(allocator, options.request_handler),
-            .rest = rest_mod.Handler.init(allocator, options.request_handler),
+            .rpc = jsonrpc_mod.Handler.init(allocator, io, options.request_handler),
+            .rest = rest_mod.Handler.init(allocator, io, options.request_handler),
             .card = .{ .producer = options.agent_card_producer },
             .mounts = options.mounts,
         };
 
         var http_cfg = options.httpz;
-        http_cfg.address = .{ .host = options.bind.host, .port = options.bind.port };
+        http_cfg.address = .{ .ip = .{ .ip4 = .{ .bytes = options.bind.host, .port = options.bind.port } } };
 
         self.* = .{
             .allocator = allocator,
@@ -121,10 +138,10 @@ pub const Server = struct {
 
         var router = try self.http.router(.{});
         // Mount a single catch-all route that dispatches inside `Dispatch`.
-        router.get("/*", Dispatch.dispatch, .{});
-        router.post("/*", Dispatch.dispatch, .{});
-        router.delete("/*", Dispatch.dispatch, .{});
-        router.put("/*", Dispatch.dispatch, .{});
+        router.get("/*", Dispatch.passthrough, .{});
+        router.post("/*", Dispatch.passthrough, .{});
+        router.delete("/*", Dispatch.passthrough, .{});
+        router.put("/*", Dispatch.passthrough, .{});
 
         return self;
     }
@@ -156,8 +173,14 @@ const testing = std.testing;
 
 test "Bind defaults to localhost:8080" {
     const b: Bind = .{};
-    try testing.expectEqualStrings("127.0.0.1", b.host);
+    try testing.expectEqual(@as([4]u8, .{ 127, 0, 0, 1 }), b.host);
     try testing.expectEqual(@as(u16, 8080), b.port);
+}
+
+test "Bind.allInterfaces uses 0.0.0.0" {
+    const b = Bind.allInterfaces(9090);
+    try testing.expectEqual(@as([4]u8, .{ 0, 0, 0, 0 }), b.host);
+    try testing.expectEqual(@as(u16, 9090), b.port);
 }
 
 test "Mounts defaults expose agent card and JSON-RPC at root" {

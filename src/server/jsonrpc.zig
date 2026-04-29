@@ -30,9 +30,10 @@ pub const Handler = struct {
     /// Long-lived allocator used for SSE streams that must outlive the
     /// per-request arena.
     allocator: std.mem.Allocator,
+    io: std.Io,
 
-    pub fn init(allocator: std.mem.Allocator, inner: RequestHandler) Handler {
-        return .{ .inner = inner, .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, inner: RequestHandler) Handler {
+        return .{ .inner = inner, .allocator = allocator, .io = io };
     }
 
     pub fn action(self: *Handler, req: *httpz.Request, res: *httpz.Response) !void {
@@ -189,7 +190,7 @@ pub const Handler = struct {
             iter.deinit();
             return writeError(res, rpc_id.*, a2a.code.INTERNAL_ERROR, "alloc stream source");
         };
-        source.* = .{ .allocator = self.allocator, .iterator = iter };
+        source.* = .{ .allocator = self.allocator, .io = self.io, .iterator = iter };
         try res.startEventStream(source, sse_mod.writeStream);
     }
 };

@@ -18,6 +18,7 @@ const log = std.log.scoped(.a2a_server);
 /// already-handed-off socket.
 pub const StreamSource = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     iterator: a2a.StreamIterator,
 
     pub fn deinit(self: *StreamSource) void {
@@ -32,8 +33,9 @@ pub const StreamSource = struct {
 /// Errors are logged and swallowed: the connection is best-effort and a
 /// half-broken socket should not propagate further.
 pub fn writeStream(source: *StreamSource, stream: std.Io.net.Stream) void {
+    const io = source.io;
     defer {
-        stream.close();
+        stream.close(io);
         source.iterator.deinit();
         const a = source.allocator;
         a.destroy(source);
@@ -42,7 +44,7 @@ pub fn writeStream(source: *StreamSource, stream: std.Io.net.Stream) void {
     while (true) {
         const next = source.iterator.next() catch |err| {
             log.warn("SSE: iterator returned error: {s}", .{@errorName(err)});
-            writeError(stream, @errorName(err)) catch {};
+            writeError(io, stream, @errorName(err)) catch {};
             return;
         };
         var event = next orelse return;
@@ -57,25 +59,25 @@ pub fn writeStream(source: *StreamSource, stream: std.Io.net.Stream) void {
             return;
         };
 
-        writeFrame(stream, json) catch |err| {
+        writeFrame(io, stream, json) catch |err| {
             log.debug("SSE: write failed (likely client disconnect): {s}", .{@errorName(err)});
             return;
         };
     }
 }
 
-fn writeFrame(stream: std.Io.net.Stream, payload: []const u8) !void {
+fn writeFrame(io: std.Io, stream: std.Io.net.Stream, payload: []const u8) !void {
     var buf: [1024]u8 = undefined;
-    var w = stream.writer(&buf);
+    var w = stream.writer(io, &buf);
     try w.interface.writeAll("data: ");
     try w.interface.writeAll(payload);
     try w.interface.writeAll("\n\n");
     try w.interface.flush();
 }
 
-fn writeError(stream: std.Io.net.Stream, msg: []const u8) !void {
+fn writeError(io: std.Io, stream: std.Io.net.Stream, msg: []const u8) !void {
     var buf: [256]u8 = undefined;
-    var w = stream.writer(&buf);
+    var w = stream.writer(io, &buf);
     try w.interface.writeAll("event: error\ndata: ");
     try w.interface.writeAll(msg);
     try w.interface.writeAll("\n\n");
