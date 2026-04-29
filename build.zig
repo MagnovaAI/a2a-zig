@@ -62,6 +62,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     pb_mod.addImport("protobuf", protobuf_mod);
+    pb_mod.addImport("a2a", a2a_mod);
 
     const client_mod = b.addModule("a2a_client", .{
         .root_source_file = b.path("src/client/root.zig"),

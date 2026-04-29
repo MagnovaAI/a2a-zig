@@ -11,6 +11,7 @@ pub const protobuf = @import("protobuf");
 pub const v1 = @import("gen/lf/a2a/v1.pb.zig");
 pub const google_api = @import("gen/google/api.pb.zig");
 pub const google_protobuf = @import("gen/google/protobuf.pb.zig");
+pub const conv = @import("pbconv.zig");
 
 const testing = std.testing;
 
@@ -22,6 +23,10 @@ test "generated TaskState matches the wire enum" {
 test "generated Role matches the wire enum" {
     try testing.expectEqual(@as(i32, 0), @intFromEnum(v1.Role.ROLE_UNSPECIFIED));
     try testing.expectEqual(@as(i32, 2), @intFromEnum(v1.Role.ROLE_AGENT));
+}
+
+test {
+    _ = conv;
 }
 
 test "round-trip a SendMessageConfiguration via protobuf wire" {
