@@ -12,6 +12,12 @@ pub fn build(b: *std.Build) void {
     });
     sysclock_mod.link_libc = true;
 
+    const sse_mod = b.addModule("sse", .{
+        .root_source_file = b.path("lib/sse/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Date/time library (rockorager/zeit). RFC 3339, ISO 8601, full TZ support.
     const zeit_dep = b.dependency("zeit", .{ .target = target, .optimize = optimize });
     const zeit_mod = zeit_dep.module("zeit");
@@ -120,6 +126,9 @@ pub fn build(b: *std.Build) void {
 
     const sysclock_tests = b.addTest(.{ .root_module = sysclock_mod });
     test_step.dependOn(&b.addRunArtifact(sysclock_tests).step);
+
+    const sse_tests = b.addTest(.{ .root_module = sse_mod });
+    test_step.dependOn(&b.addRunArtifact(sse_tests).step);
 
     const pb_tests = b.addTest(.{ .root_module = pb_mod });
     test_step.dependOn(&b.addRunArtifact(pb_tests).step);
