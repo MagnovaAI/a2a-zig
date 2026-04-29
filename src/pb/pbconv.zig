@@ -1145,6 +1145,794 @@ pub fn getExtendedAgentCardRequestFromProto(
 }
 
 // ---------------------------------------------------------------------------
+// AgentInterface
+// ---------------------------------------------------------------------------
+
+pub fn agentInterfaceToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentInterface,
+) !v1.AgentInterface {
+    return .{
+        .url = try allocator.dupe(u8, src.url),
+        .protocol_binding = try allocator.dupe(u8, src.protocol_binding),
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .protocol_version = try allocator.dupe(u8, src.protocol_version),
+    };
+}
+
+pub fn agentInterfaceFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentInterface,
+) !a2a.AgentInterface {
+    var out: a2a.AgentInterface = .{
+        .url = try allocator.dupe(u8, src.url),
+        .protocol_binding = try allocator.dupe(u8, src.protocol_binding),
+        .protocol_version = try allocator.dupe(u8, src.protocol_version),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// AgentProvider
+// ---------------------------------------------------------------------------
+
+pub fn agentProviderToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentProvider,
+) !v1.AgentProvider {
+    return .{
+        .url = try allocator.dupe(u8, src.url),
+        .organization = try allocator.dupe(u8, src.organization),
+    };
+}
+
+pub fn agentProviderFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentProvider,
+) !a2a.AgentProvider {
+    return .{
+        .organization = try allocator.dupe(u8, src.organization),
+        .url = try allocator.dupe(u8, src.url),
+        .allocator = allocator,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// AgentExtension
+// ---------------------------------------------------------------------------
+
+pub fn agentExtensionToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentExtension,
+) !v1.AgentExtension {
+    return .{
+        .uri = try allocator.dupe(u8, src.uri),
+        .description = try optStrToProto(allocator, src.description),
+        .required = src.required orelse false,
+        .params = try metadataToProto(allocator, src.params),
+    };
+}
+
+pub fn agentExtensionFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentExtension,
+) !a2a.AgentExtension {
+    var out: a2a.AgentExtension = .{
+        .uri = try allocator.dupe(u8, src.uri),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    out.required = src.required;
+    if (try metadataFromProto(allocator, src.params)) |m| out.params = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// AgentCapabilities
+// ---------------------------------------------------------------------------
+
+pub fn agentCapabilitiesToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentCapabilities,
+) !v1.AgentCapabilities {
+    var ext_list: std.ArrayList(v1.AgentExtension) = .empty;
+    if (src.extensions) |arr| {
+        try ext_list.ensureTotalCapacityPrecise(allocator, arr.len);
+        for (arr) |e| ext_list.appendAssumeCapacity(try agentExtensionToProto(allocator, e));
+    }
+    return .{
+        .streaming = src.streaming,
+        .push_notifications = src.push_notifications,
+        .extensions = ext_list,
+        .extended_agent_card = src.extended_agent_card,
+    };
+}
+
+pub fn agentCapabilitiesFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentCapabilities,
+) !a2a.AgentCapabilities {
+    var out: a2a.AgentCapabilities = .{ .allocator = allocator };
+    errdefer out.deinit();
+    if (src.streaming) |b| out.streaming = b;
+    if (src.push_notifications) |b| out.push_notifications = b;
+    if (src.extended_agent_card) |b| out.extended_agent_card = b;
+    if (src.extensions.items.len > 0) {
+        const dst = try allocator.alloc(a2a.AgentExtension, src.extensions.items.len);
+        var i: usize = 0;
+        errdefer {
+            for (dst[0..i]) |*e| e.deinit();
+            allocator.free(dst);
+        }
+        while (i < src.extensions.items.len) : (i += 1) {
+            dst[i] = try agentExtensionFromProto(allocator, src.extensions.items[i]);
+        }
+        out.extensions = dst;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SecurityRequirement (proto: schemes -> StringList; native: scheme -> [scopes])
+// ---------------------------------------------------------------------------
+
+pub fn securityRequirementToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SecurityRequirement,
+) !v1.SecurityRequirement {
+    var entries: std.ArrayList(v1.SecurityRequirement.SchemesEntry) = .empty;
+    try entries.ensureTotalCapacityPrecise(allocator, src.entries.count());
+    var it = src.entries.iterator();
+    while (it.next()) |e| {
+        var list: std.ArrayList([]const u8) = .empty;
+        try list.ensureTotalCapacityPrecise(allocator, e.value_ptr.*.len);
+        for (e.value_ptr.*) |scope| list.appendAssumeCapacity(try allocator.dupe(u8, scope));
+        entries.appendAssumeCapacity(.{
+            .key = try allocator.dupe(u8, e.key_ptr.*),
+            .value = .{ .list = list },
+        });
+    }
+    return .{ .schemes = entries };
+}
+
+pub fn securityRequirementFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SecurityRequirement,
+) !a2a.SecurityRequirement {
+    var out: a2a.SecurityRequirement = .{ .allocator = allocator };
+    errdefer out.deinit();
+    for (src.schemes.items) |entry| {
+        const scopes_src = if (entry.value) |sl| sl.list.items else &[_][]const u8{};
+        const scopes = try allocator.alloc([]const u8, scopes_src.len);
+        var i: usize = 0;
+        errdefer {
+            for (scopes[0..i]) |s| allocator.free(s);
+            allocator.free(scopes);
+        }
+        while (i < scopes_src.len) : (i += 1) scopes[i] = try allocator.dupe(u8, scopes_src[i]);
+        const key = try allocator.dupe(u8, entry.key);
+        errdefer allocator.free(key);
+        try out.entries.put(allocator, key, scopes);
+    }
+    return out;
+}
+
+fn securityRequirementsToProtoList(
+    allocator: std.mem.Allocator,
+    src: ?[]a2a.SecurityRequirement,
+) !std.ArrayList(v1.SecurityRequirement) {
+    var out: std.ArrayList(v1.SecurityRequirement) = .empty;
+    if (src) |arr| {
+        try out.ensureTotalCapacityPrecise(allocator, arr.len);
+        for (arr) |r| out.appendAssumeCapacity(try securityRequirementToProto(allocator, r));
+    }
+    return out;
+}
+
+fn securityRequirementsFromProtoList(
+    allocator: std.mem.Allocator,
+    src: std.ArrayList(v1.SecurityRequirement),
+) !?[]a2a.SecurityRequirement {
+    if (src.items.len == 0) return null;
+    const out = try allocator.alloc(a2a.SecurityRequirement, src.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (out[0..i]) |*r| r.deinit();
+        allocator.free(out);
+    }
+    while (i < src.items.len) : (i += 1) {
+        out[i] = try securityRequirementFromProto(allocator, src.items[i]);
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// AgentSkill
+// ---------------------------------------------------------------------------
+
+pub fn agentSkillToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentSkill,
+) !v1.AgentSkill {
+    return .{
+        .id = try allocator.dupe(u8, src.id),
+        .name = try allocator.dupe(u8, src.name),
+        .description = try allocator.dupe(u8, src.description),
+        .tags = try strListReqToProto(allocator, src.tags),
+        .examples = try strListToProto(allocator, src.examples),
+        .input_modes = try strListToProto(allocator, src.input_modes),
+        .output_modes = try strListToProto(allocator, src.output_modes),
+        .security_requirements = try securityRequirementsToProtoList(allocator, src.security_requirements),
+    };
+}
+
+pub fn agentSkillFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentSkill,
+) !a2a.AgentSkill {
+    var out: a2a.AgentSkill = .{
+        .id = try allocator.dupe(u8, src.id),
+        .name = try allocator.dupe(u8, src.name),
+        .description = try allocator.dupe(u8, src.description),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    out.tags = try strListReqFromProto(allocator, src.tags);
+    if (try strListFromProto(allocator, src.examples)) |arr| out.examples = arr;
+    if (try strListFromProto(allocator, src.input_modes)) |arr| out.input_modes = arr;
+    if (try strListFromProto(allocator, src.output_modes)) |arr| out.output_modes = arr;
+    if (try securityRequirementsFromProtoList(allocator, src.security_requirements)) |arr| {
+        out.security_requirements = arr;
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// AgentCardSignature
+// ---------------------------------------------------------------------------
+
+pub fn agentCardSignatureToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentCardSignature,
+) !v1.AgentCardSignature {
+    return .{
+        .protected = try allocator.dupe(u8, src.protected),
+        .signature = try allocator.dupe(u8, src.signature),
+        .header = try metadataToProto(allocator, src.header),
+    };
+}
+
+pub fn agentCardSignatureFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentCardSignature,
+) !a2a.AgentCardSignature {
+    var out: a2a.AgentCardSignature = .{
+        .protected = try allocator.dupe(u8, src.protected),
+        .signature = try allocator.dupe(u8, src.signature),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try metadataFromProto(allocator, src.header)) |m| out.header = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Security schemes
+// ---------------------------------------------------------------------------
+
+pub fn apiKeySecuritySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.ApiKeySecurityScheme,
+) !v1.APIKeySecurityScheme {
+    return .{
+        .description = try optStrToProto(allocator, src.description),
+        .location = try allocator.dupe(u8, src.location),
+        .name = try allocator.dupe(u8, src.name),
+    };
+}
+
+pub fn apiKeySecuritySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.APIKeySecurityScheme,
+) !a2a.ApiKeySecurityScheme {
+    var out: a2a.ApiKeySecurityScheme = .{
+        .location = try allocator.dupe(u8, src.location),
+        .name = try allocator.dupe(u8, src.name),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    return out;
+}
+
+pub fn httpAuthSecuritySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.HttpAuthSecurityScheme,
+) !v1.HTTPAuthSecurityScheme {
+    return .{
+        .description = try optStrToProto(allocator, src.description),
+        .scheme = try allocator.dupe(u8, src.scheme),
+        .bearer_format = try optStrToProto(allocator, src.bearer_format),
+    };
+}
+
+pub fn httpAuthSecuritySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.HTTPAuthSecurityScheme,
+) !a2a.HttpAuthSecurityScheme {
+    var out: a2a.HttpAuthSecurityScheme = .{
+        .scheme = try allocator.dupe(u8, src.scheme),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    if (try optStrFromProto(allocator, src.bearer_format)) |s| out.bearer_format = s;
+    return out;
+}
+
+pub fn openIdConnectSecuritySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.OpenIdConnectSecurityScheme,
+) !v1.OpenIdConnectSecurityScheme {
+    return .{
+        .description = try optStrToProto(allocator, src.description),
+        .open_id_connect_url = try allocator.dupe(u8, src.open_id_connect_url),
+    };
+}
+
+pub fn openIdConnectSecuritySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.OpenIdConnectSecurityScheme,
+) !a2a.OpenIdConnectSecurityScheme {
+    var out: a2a.OpenIdConnectSecurityScheme = .{
+        .open_id_connect_url = try allocator.dupe(u8, src.open_id_connect_url),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    return out;
+}
+
+pub fn mutualTlsSecuritySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.MutualTlsSecurityScheme,
+) !v1.MutualTlsSecurityScheme {
+    return .{
+        .description = try optStrToProto(allocator, src.description),
+    };
+}
+
+pub fn mutualTlsSecuritySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.MutualTlsSecurityScheme,
+) !a2a.MutualTlsSecurityScheme {
+    var out: a2a.MutualTlsSecurityScheme = .{ .allocator = allocator };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// OAuth flows + scopes
+//
+// Each flow's `scopes` is a repeated `ScopesEntry { key, value }` pair on the
+// proto side. Generic over the entry type so all five flows share the helper.
+// ---------------------------------------------------------------------------
+
+fn scopesToProto(
+    comptime Entry: type,
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.StringMap,
+) !std.ArrayList(Entry) {
+    var out: std.ArrayList(Entry) = .empty;
+    try out.ensureTotalCapacityPrecise(allocator, src.entries.count());
+    var it = src.entries.iterator();
+    while (it.next()) |e| {
+        out.appendAssumeCapacity(.{
+            .key = try allocator.dupe(u8, e.key_ptr.*),
+            .value = try allocator.dupe(u8, e.value_ptr.*),
+        });
+    }
+    return out;
+}
+
+fn scopesFromProto(
+    comptime Entry: type,
+    allocator: std.mem.Allocator,
+    src: std.ArrayList(Entry),
+) !a2a.agent_card.StringMap {
+    var out: a2a.agent_card.StringMap = .{ .allocator = allocator };
+    errdefer out.deinit();
+    for (src.items) |entry| {
+        const k = try allocator.dupe(u8, entry.key);
+        errdefer allocator.free(k);
+        const v = try allocator.dupe(u8, entry.value);
+        errdefer allocator.free(v);
+        try out.entries.put(allocator, k, v);
+    }
+    return out;
+}
+
+pub fn authorizationCodeOAuthFlowToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.AuthorizationCodeOAuthFlow,
+) !v1.AuthorizationCodeOAuthFlow {
+    return .{
+        .authorization_url = try allocator.dupe(u8, src.authorization_url),
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .refresh_url = try optStrToProto(allocator, src.refresh_url),
+        .scopes = try scopesToProto(v1.AuthorizationCodeOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .pkce_required = src.pkce_required orelse false,
+    };
+}
+
+pub fn authorizationCodeOAuthFlowFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AuthorizationCodeOAuthFlow,
+) !a2a.agent_card.AuthorizationCodeOAuthFlow {
+    var out: a2a.agent_card.AuthorizationCodeOAuthFlow = .{
+        .authorization_url = try allocator.dupe(u8, src.authorization_url),
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .scopes = try scopesFromProto(v1.AuthorizationCodeOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.refresh_url)) |s| out.refresh_url = s;
+    out.pkce_required = src.pkce_required;
+    return out;
+}
+
+pub fn clientCredentialsOAuthFlowToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.ClientCredentialsOAuthFlow,
+) !v1.ClientCredentialsOAuthFlow {
+    return .{
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .refresh_url = try optStrToProto(allocator, src.refresh_url),
+        .scopes = try scopesToProto(v1.ClientCredentialsOAuthFlow.ScopesEntry, allocator, src.scopes),
+    };
+}
+
+pub fn clientCredentialsOAuthFlowFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ClientCredentialsOAuthFlow,
+) !a2a.agent_card.ClientCredentialsOAuthFlow {
+    var out: a2a.agent_card.ClientCredentialsOAuthFlow = .{
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .scopes = try scopesFromProto(v1.ClientCredentialsOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.refresh_url)) |s| out.refresh_url = s;
+    return out;
+}
+
+pub fn implicitOAuthFlowToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.ImplicitOAuthFlow,
+) !v1.ImplicitOAuthFlow {
+    return .{
+        .authorization_url = try allocator.dupe(u8, src.authorization_url),
+        .refresh_url = try optStrToProto(allocator, src.refresh_url),
+        .scopes = try scopesToProto(v1.ImplicitOAuthFlow.ScopesEntry, allocator, src.scopes),
+    };
+}
+
+pub fn implicitOAuthFlowFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ImplicitOAuthFlow,
+) !a2a.agent_card.ImplicitOAuthFlow {
+    var out: a2a.agent_card.ImplicitOAuthFlow = .{
+        .authorization_url = try allocator.dupe(u8, src.authorization_url),
+        .scopes = try scopesFromProto(v1.ImplicitOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.refresh_url)) |s| out.refresh_url = s;
+    return out;
+}
+
+pub fn passwordOAuthFlowToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.PasswordOAuthFlow,
+) !v1.PasswordOAuthFlow {
+    return .{
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .refresh_url = try optStrToProto(allocator, src.refresh_url),
+        .scopes = try scopesToProto(v1.PasswordOAuthFlow.ScopesEntry, allocator, src.scopes),
+    };
+}
+
+pub fn passwordOAuthFlowFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.PasswordOAuthFlow,
+) !a2a.agent_card.PasswordOAuthFlow {
+    var out: a2a.agent_card.PasswordOAuthFlow = .{
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .scopes = try scopesFromProto(v1.PasswordOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.refresh_url)) |s| out.refresh_url = s;
+    return out;
+}
+
+pub fn deviceCodeOAuthFlowToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.agent_card.DeviceCodeOAuthFlow,
+) !v1.DeviceCodeOAuthFlow {
+    return .{
+        .device_authorization_url = try allocator.dupe(u8, src.device_authorization_url),
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .refresh_url = try optStrToProto(allocator, src.refresh_url),
+        .scopes = try scopesToProto(v1.DeviceCodeOAuthFlow.ScopesEntry, allocator, src.scopes),
+    };
+}
+
+pub fn deviceCodeOAuthFlowFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.DeviceCodeOAuthFlow,
+) !a2a.agent_card.DeviceCodeOAuthFlow {
+    var out: a2a.agent_card.DeviceCodeOAuthFlow = .{
+        .device_authorization_url = try allocator.dupe(u8, src.device_authorization_url),
+        .token_url = try allocator.dupe(u8, src.token_url),
+        .scopes = try scopesFromProto(v1.DeviceCodeOAuthFlow.ScopesEntry, allocator, src.scopes),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.refresh_url)) |s| out.refresh_url = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// OAuthFlows union
+// ---------------------------------------------------------------------------
+
+pub fn oauthFlowsToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.OAuthFlows,
+) !v1.OAuthFlows {
+    var flow: ?v1.OAuthFlows.flow_union = null;
+    switch (src) {
+        .authorization_code => |f| flow = .{ .authorization_code = try authorizationCodeOAuthFlowToProto(allocator, f) },
+        .client_credentials => |f| flow = .{ .client_credentials = try clientCredentialsOAuthFlowToProto(allocator, f) },
+        .implicit => |f| flow = .{ .implicit = try implicitOAuthFlowToProto(allocator, f) },
+        .password => |f| flow = .{ .password = try passwordOAuthFlowToProto(allocator, f) },
+        .device_code => |f| flow = .{ .device_code = try deviceCodeOAuthFlowToProto(allocator, f) },
+        .unknown => {
+            // Unknown variants on the JSON wire have no protobuf
+            // representation; collapse to an empty oneof so the proto remains
+            // valid. The native side already preserved the original payload
+            // for JSON re-emission.
+            flow = null;
+        },
+    }
+    return .{ .flow = flow };
+}
+
+pub fn oauthFlowsFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.OAuthFlows,
+) !a2a.OAuthFlows {
+    const f = src.flow orelse return error.InvalidTimestamp;
+    return switch (f) {
+        .authorization_code => |x| .{ .authorization_code = try authorizationCodeOAuthFlowFromProto(allocator, x) },
+        .client_credentials => |x| .{ .client_credentials = try clientCredentialsOAuthFlowFromProto(allocator, x) },
+        .implicit => |x| .{ .implicit = try implicitOAuthFlowFromProto(allocator, x) },
+        .password => |x| .{ .password = try passwordOAuthFlowFromProto(allocator, x) },
+        .device_code => |x| .{ .device_code = try deviceCodeOAuthFlowFromProto(allocator, x) },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// OAuth2 security scheme
+// ---------------------------------------------------------------------------
+
+pub fn oauth2SecuritySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.OAuth2SecurityScheme,
+) !v1.OAuth2SecurityScheme {
+    return .{
+        .description = try optStrToProto(allocator, src.description),
+        .flows = try oauthFlowsToProto(allocator, src.flows),
+        .oauth2_metadata_url = try optStrToProto(allocator, src.oauth2_metadata_url),
+    };
+}
+
+pub fn oauth2SecuritySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.OAuth2SecurityScheme,
+) !a2a.OAuth2SecurityScheme {
+    const flows_proto = src.flows orelse return error.InvalidTimestamp;
+    var flows = try oauthFlowsFromProto(allocator, flows_proto);
+    errdefer flows.deinit();
+    var out: a2a.OAuth2SecurityScheme = .{
+        .flows = flows,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    if (try optStrFromProto(allocator, src.oauth2_metadata_url)) |s| out.oauth2_metadata_url = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SecurityScheme union
+// ---------------------------------------------------------------------------
+
+pub fn securitySchemeToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SecurityScheme,
+) !v1.SecurityScheme {
+    var scheme: ?v1.SecurityScheme.scheme_union = null;
+    switch (src) {
+        .api_key => |s| scheme = .{ .api_key_security_scheme = try apiKeySecuritySchemeToProto(allocator, s) },
+        .http_auth => |s| scheme = .{ .http_auth_security_scheme = try httpAuthSecuritySchemeToProto(allocator, s) },
+        .oauth2 => |s| scheme = .{ .oauth2_security_scheme = try oauth2SecuritySchemeToProto(allocator, s) },
+        .openid_connect => |s| scheme = .{ .open_id_connect_security_scheme = try openIdConnectSecuritySchemeToProto(allocator, s) },
+        .mtls => |s| scheme = .{ .mtls_security_scheme = try mutualTlsSecuritySchemeToProto(allocator, s) },
+        .unknown => {
+            // Same forward-compat handling as OAuthFlows: drop on the proto
+            // side; native side already retains the original JSON payload.
+            scheme = null;
+        },
+    }
+    return .{ .scheme = scheme };
+}
+
+pub fn securitySchemeFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SecurityScheme,
+) !a2a.SecurityScheme {
+    const s = src.scheme orelse return error.InvalidTimestamp;
+    return switch (s) {
+        .api_key_security_scheme => |x| .{ .api_key = try apiKeySecuritySchemeFromProto(allocator, x) },
+        .http_auth_security_scheme => |x| .{ .http_auth = try httpAuthSecuritySchemeFromProto(allocator, x) },
+        .oauth2_security_scheme => |x| .{ .oauth2 = try oauth2SecuritySchemeFromProto(allocator, x) },
+        .open_id_connect_security_scheme => |x| .{ .openid_connect = try openIdConnectSecuritySchemeFromProto(allocator, x) },
+        .mtls_security_scheme => |x| .{ .mtls = try mutualTlsSecuritySchemeFromProto(allocator, x) },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// AgentCard
+// ---------------------------------------------------------------------------
+
+pub fn agentCardToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.AgentCard,
+) !v1.AgentCard {
+    var ifaces: std.ArrayList(v1.AgentInterface) = .empty;
+    try ifaces.ensureTotalCapacityPrecise(allocator, src.supported_interfaces.len);
+    for (src.supported_interfaces) |i| ifaces.appendAssumeCapacity(try agentInterfaceToProto(allocator, i));
+
+    var skills: std.ArrayList(v1.AgentSkill) = .empty;
+    try skills.ensureTotalCapacityPrecise(allocator, src.skills.len);
+    for (src.skills) |s| skills.appendAssumeCapacity(try agentSkillToProto(allocator, s));
+
+    var schemes: std.ArrayList(v1.AgentCard.SecuritySchemesEntry) = .empty;
+    if (src.security_schemes) |ss| {
+        try schemes.ensureTotalCapacityPrecise(allocator, ss.entries.count());
+        var it = ss.entries.iterator();
+        while (it.next()) |entry| {
+            schemes.appendAssumeCapacity(.{
+                .key = try allocator.dupe(u8, entry.key_ptr.*),
+                .value = try securitySchemeToProto(allocator, entry.value_ptr.*),
+            });
+        }
+    }
+
+    var sigs: std.ArrayList(v1.AgentCardSignature) = .empty;
+    if (src.signatures) |arr| {
+        try sigs.ensureTotalCapacityPrecise(allocator, arr.len);
+        for (arr) |s| sigs.appendAssumeCapacity(try agentCardSignatureToProto(allocator, s));
+    }
+
+    return .{
+        .name = try allocator.dupe(u8, src.name),
+        .description = try allocator.dupe(u8, src.description),
+        .supported_interfaces = ifaces,
+        .provider = if (src.provider) |p| try agentProviderToProto(allocator, p) else null,
+        .version = try allocator.dupe(u8, src.version),
+        .documentation_url = if (src.documentation_url) |s| try allocator.dupe(u8, s) else null,
+        .capabilities = try agentCapabilitiesToProto(allocator, src.capabilities),
+        .security_schemes = schemes,
+        .security_requirements = try securityRequirementsToProtoList(allocator, src.security_requirements),
+        .default_input_modes = try strListReqToProto(allocator, src.default_input_modes),
+        .default_output_modes = try strListReqToProto(allocator, src.default_output_modes),
+        .skills = skills,
+        .signatures = sigs,
+        .icon_url = if (src.icon_url) |s| try allocator.dupe(u8, s) else null,
+    };
+}
+
+pub fn agentCardFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.AgentCard,
+) !a2a.AgentCard {
+    const ifaces = try allocator.alloc(a2a.AgentInterface, src.supported_interfaces.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (ifaces[0..i]) |*x| x.deinit();
+        allocator.free(ifaces);
+    }
+    while (i < src.supported_interfaces.items.len) : (i += 1) {
+        ifaces[i] = try agentInterfaceFromProto(allocator, src.supported_interfaces.items[i]);
+    }
+
+    const skills = try allocator.alloc(a2a.AgentSkill, src.skills.items.len);
+    var j: usize = 0;
+    errdefer {
+        for (skills[0..j]) |*s| s.deinit();
+        allocator.free(skills);
+    }
+    while (j < src.skills.items.len) : (j += 1) {
+        skills[j] = try agentSkillFromProto(allocator, src.skills.items[j]);
+    }
+
+    var card: a2a.AgentCard = .{
+        .name = try allocator.dupe(u8, src.name),
+        .description = try allocator.dupe(u8, src.description),
+        .version = try allocator.dupe(u8, src.version),
+        .supported_interfaces = ifaces,
+        .capabilities = if (src.capabilities) |c|
+            try agentCapabilitiesFromProto(allocator, c)
+        else
+            a2a.AgentCapabilities.default(allocator),
+        .default_input_modes = try strListReqFromProto(allocator, src.default_input_modes),
+        .default_output_modes = try strListReqFromProto(allocator, src.default_output_modes),
+        .skills = skills,
+        .allocator = allocator,
+    };
+    errdefer card.deinit();
+
+    if (src.provider) |p| card.provider = try agentProviderFromProto(allocator, p);
+    if (src.documentation_url) |s| if (s.len > 0) {
+        card.documentation_url = try allocator.dupe(u8, s);
+    };
+    if (src.icon_url) |s| if (s.len > 0) {
+        card.icon_url = try allocator.dupe(u8, s);
+    };
+
+    if (src.security_schemes.items.len > 0) {
+        var schemes: a2a.SecuritySchemes = .{ .allocator = allocator };
+        errdefer schemes.deinit();
+        for (src.security_schemes.items) |entry| {
+            const proto_value = entry.value orelse continue;
+            var scheme = try securitySchemeFromProto(allocator, proto_value);
+            errdefer scheme.deinit();
+            const k = try allocator.dupe(u8, entry.key);
+            errdefer allocator.free(k);
+            try schemes.entries.put(allocator, k, scheme);
+        }
+        if (schemes.entries.count() > 0) card.security_schemes = schemes;
+    }
+
+    if (try securityRequirementsFromProtoList(allocator, src.security_requirements)) |arr| {
+        card.security_requirements = arr;
+    }
+
+    if (src.signatures.items.len > 0) {
+        const sigs = try allocator.alloc(a2a.AgentCardSignature, src.signatures.items.len);
+        var k: usize = 0;
+        errdefer {
+            for (sigs[0..k]) |*s| s.deinit();
+            allocator.free(sigs);
+        }
+        while (k < src.signatures.items.len) : (k += 1) {
+            sigs[k] = try agentCardSignatureFromProto(allocator, src.signatures.items[k]);
+        }
+        card.signatures = sigs;
+    }
+
+    return card;
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -1745,6 +2533,277 @@ test "list task push notification response round-trips" {
     defer back.deinit();
     try testing.expectEqual(@as(usize, 1), back.configs.len);
     try testing.expectEqualStrings("next", back.next_page_token.?);
+}
+
+test "agent interface round-trips" {
+    const a = testing.allocator;
+    var native = try a2a.AgentInterface.init(a, "http://localhost:3000", "JSONRPC");
+    defer native.deinit();
+
+    var proto = try agentInterfaceToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("http://localhost:3000", proto.url);
+    try testing.expectEqualStrings("JSONRPC", proto.protocol_binding);
+
+    var back = try agentInterfaceFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings(native.url, back.url);
+    try testing.expectEqualStrings(native.protocol_binding, back.protocol_binding);
+}
+
+test "agent provider round-trips" {
+    const a = testing.allocator;
+    var native = a2a.AgentProvider{
+        .organization = try a.dupe(u8, "Magnova"),
+        .url = try a.dupe(u8, "https://magnova.ai"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try agentProviderToProto(a, native);
+    defer proto.deinit(a);
+    var back = try agentProviderFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("Magnova", back.organization);
+    try testing.expectEqualStrings("https://magnova.ai", back.url);
+}
+
+test "agent capabilities round-trips with extensions" {
+    const a = testing.allocator;
+    const exts = try a.alloc(a2a.AgentExtension, 1);
+    exts[0] = .{
+        .uri = try a.dupe(u8, "https://example.com/ext"),
+        .required = true,
+        .allocator = a,
+    };
+    var native = a2a.AgentCapabilities{
+        .streaming = true,
+        .push_notifications = false,
+        .extensions = exts,
+        .extended_agent_card = true,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try agentCapabilitiesToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(?bool, true), proto.streaming);
+    try testing.expectEqual(@as(usize, 1), proto.extensions.items.len);
+
+    var back = try agentCapabilitiesFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(@as(?bool, true), back.streaming);
+    try testing.expect(back.extensions != null);
+    try testing.expectEqual(@as(usize, 1), back.extensions.?.len);
+    try testing.expectEqualStrings("https://example.com/ext", back.extensions.?[0].uri);
+}
+
+test "agent skill round-trips" {
+    const a = testing.allocator;
+    const tags = try a.alloc([]const u8, 1);
+    tags[0] = try a.dupe(u8, "demo");
+    var native = a2a.AgentSkill{
+        .id = try a.dupe(u8, "echo"),
+        .name = try a.dupe(u8, "Echo"),
+        .description = try a.dupe(u8, "Echoes input"),
+        .tags = tags,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try agentSkillToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("echo", proto.id);
+    try testing.expectEqual(@as(usize, 1), proto.tags.items.len);
+
+    var back = try agentSkillFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("echo", back.id);
+    try testing.expectEqual(@as(usize, 1), back.tags.len);
+    try testing.expectEqualStrings("demo", back.tags[0]);
+}
+
+test "security requirement round-trips with scopes" {
+    const a = testing.allocator;
+    var req: a2a.SecurityRequirement = .{ .allocator = a };
+    defer req.deinit();
+    const scopes = try a.alloc([]const u8, 2);
+    scopes[0] = try a.dupe(u8, "read");
+    scopes[1] = try a.dupe(u8, "write");
+    try req.entries.put(a, try a.dupe(u8, "bearer"), scopes);
+
+    var proto = try securityRequirementToProto(a, req);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(usize, 1), proto.schemes.items.len);
+    try testing.expectEqualStrings("bearer", proto.schemes.items[0].key);
+    try testing.expectEqual(@as(usize, 2), proto.schemes.items[0].value.?.list.items.len);
+
+    var back = try securityRequirementFromProto(a, proto);
+    defer back.deinit();
+    const back_scopes = back.entries.get("bearer").?;
+    try testing.expectEqual(@as(usize, 2), back_scopes.len);
+    try testing.expectEqualStrings("read", back_scopes[0]);
+    try testing.expectEqualStrings("write", back_scopes[1]);
+}
+
+test "api key security scheme round-trips" {
+    const a = testing.allocator;
+    var native = a2a.ApiKeySecurityScheme{
+        .location = try a.dupe(u8, "header"),
+        .name = try a.dupe(u8, "X-API-Key"),
+        .description = try a.dupe(u8, "use this to auth"),
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try apiKeySecuritySchemeToProto(a, native);
+    defer proto.deinit(a);
+    var back = try apiKeySecuritySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("header", back.location);
+    try testing.expectEqualStrings("X-API-Key", back.name);
+    try testing.expectEqualStrings("use this to auth", back.description.?);
+}
+
+test "http auth security scheme round-trips" {
+    const a = testing.allocator;
+    var native = a2a.HttpAuthSecurityScheme{
+        .scheme = try a.dupe(u8, "Bearer"),
+        .bearer_format = try a.dupe(u8, "JWT"),
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try httpAuthSecuritySchemeToProto(a, native);
+    defer proto.deinit(a);
+    var back = try httpAuthSecuritySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("Bearer", back.scheme);
+    try testing.expectEqualStrings("JWT", back.bearer_format.?);
+}
+
+test "openid connect security scheme round-trips" {
+    const a = testing.allocator;
+    var native = a2a.OpenIdConnectSecurityScheme{
+        .open_id_connect_url = try a.dupe(u8, "https://example.com/.well-known/openid-configuration"),
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try openIdConnectSecuritySchemeToProto(a, native);
+    defer proto.deinit(a);
+    var back = try openIdConnectSecuritySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("https://example.com/.well-known/openid-configuration", back.open_id_connect_url);
+}
+
+test "mtls security scheme round-trips" {
+    const a = testing.allocator;
+    var native = a2a.MutualTlsSecurityScheme{
+        .description = try a.dupe(u8, "client cert required"),
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try mutualTlsSecuritySchemeToProto(a, native);
+    defer proto.deinit(a);
+    var back = try mutualTlsSecuritySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("client cert required", back.description.?);
+}
+
+test "client credentials oauth flow round-trips with scopes" {
+    const a = testing.allocator;
+    var scopes: a2a.agent_card.StringMap = .{ .allocator = a };
+    try scopes.entries.put(a, try a.dupe(u8, "read"), try a.dupe(u8, "Read access"));
+
+    var native = a2a.agent_card.ClientCredentialsOAuthFlow{
+        .token_url = try a.dupe(u8, "https://auth.example.com/token"),
+        .scopes = scopes,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try clientCredentialsOAuthFlowToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(usize, 1), proto.scopes.items.len);
+
+    var back = try clientCredentialsOAuthFlowFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("Read access", back.scopes.entries.get("read").?);
+}
+
+test "oauth2 scheme with client credentials flow round-trips" {
+    const a = testing.allocator;
+    var scopes: a2a.agent_card.StringMap = .{ .allocator = a };
+    try scopes.entries.put(a, try a.dupe(u8, "write"), try a.dupe(u8, "Write access"));
+
+    var native = a2a.OAuth2SecurityScheme{
+        .flows = .{ .client_credentials = .{
+            .token_url = try a.dupe(u8, "https://auth.example.com/token"),
+            .scopes = scopes,
+            .allocator = a,
+        } },
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try oauth2SecuritySchemeToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try oauth2SecuritySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back.flows == .client_credentials);
+    try testing.expectEqualStrings("Write access", back.flows.client_credentials.scopes.entries.get("write").?);
+}
+
+test "security scheme union round-trips api key" {
+    const a = testing.allocator;
+    var native = a2a.SecurityScheme{
+        .api_key = .{
+            .location = try a.dupe(u8, "header"),
+            .name = try a.dupe(u8, "X-API-Key"),
+            .allocator = a,
+        },
+    };
+    defer native.deinit();
+    var proto = try securitySchemeToProto(a, native);
+    defer proto.deinit(a);
+    var back = try securitySchemeFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back == .api_key);
+    try testing.expectEqualStrings("X-API-Key", back.api_key.name);
+}
+
+test "agent card minimal round-trips" {
+    const a = testing.allocator;
+    const ifaces = try a.alloc(a2a.AgentInterface, 1);
+    ifaces[0] = try a2a.AgentInterface.init(a, "http://localhost:3000", "JSONRPC");
+
+    const skills = try a.alloc(a2a.AgentSkill, 0);
+    const input_modes = try a.alloc([]const u8, 1);
+    input_modes[0] = try a.dupe(u8, "text/plain");
+    const output_modes = try a.alloc([]const u8, 1);
+    output_modes[0] = try a.dupe(u8, "text/plain");
+
+    var native = a2a.AgentCard{
+        .name = try a.dupe(u8, "Test Agent"),
+        .description = try a.dupe(u8, "A test agent"),
+        .version = try a.dupe(u8, "1.0.0"),
+        .supported_interfaces = ifaces,
+        .capabilities = .{ .streaming = true, .allocator = a },
+        .default_input_modes = input_modes,
+        .default_output_modes = output_modes,
+        .skills = skills,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try agentCardToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try agentCardFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("Test Agent", back.name);
+    try testing.expectEqual(@as(?bool, true), back.capabilities.streaming);
+    try testing.expectEqual(@as(usize, 1), back.supported_interfaces.len);
+    try testing.expectEqualStrings("JSONRPC", back.supported_interfaces[0].protocol_binding);
 }
 
 test "task wire round-trip via protobuf bytes" {
