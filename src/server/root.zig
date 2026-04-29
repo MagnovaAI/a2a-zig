@@ -3,14 +3,26 @@ const std = @import("std");
 pub const a2a = @import("a2a");
 pub const middleware = @import("middleware.zig");
 pub const executor = @import("executor.zig");
+pub const task_store = struct {
+    pub const store = @import("task_store/store.zig");
+    pub const inmemory = @import("task_store/inmemory.zig");
+    pub const TaskStore = store.TaskStore;
+    pub const TaskVersion = store.TaskVersion;
+    pub const InMemoryTaskStore = inmemory.InMemoryTaskStore;
+};
 
 pub const User = middleware.User;
 pub const ServiceParams = middleware.ServiceParams;
 pub const CallContext = middleware.CallContext;
 pub const AgentExecutor = executor.AgentExecutor;
 pub const ExecutorContext = executor.ExecutorContext;
+pub const TaskStore = task_store.TaskStore;
+pub const TaskVersion = task_store.TaskVersion;
+pub const InMemoryTaskStore = task_store.InMemoryTaskStore;
 
 test {
     _ = middleware;
     _ = executor;
+    _ = task_store.store;
+    _ = task_store.inmemory;
 }
