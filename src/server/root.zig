@@ -5,6 +5,7 @@ pub const middleware = @import("middleware.zig");
 pub const executor = @import("executor.zig");
 pub const agent_card = @import("agent_card.zig");
 pub const execution = @import("execution.zig");
+pub const handler = @import("handler.zig");
 pub const task_store = struct {
     pub const store = @import("task_store/store.zig");
     pub const inmemory = @import("task_store/inmemory.zig");
@@ -40,6 +41,8 @@ pub const WELL_KNOWN_AGENT_CARD_PATH = agent_card.WELL_KNOWN_AGENT_CARD_PATH;
 pub const ActiveExecution = execution.ActiveExecution;
 pub const ExecutionManager = execution.ExecutionManager;
 pub const ExecutionEvent = execution.ExecutionEvent;
+pub const RequestHandler = handler.RequestHandler;
+pub const DefaultRequestHandler = handler.DefaultRequestHandler;
 
 test {
     _ = middleware;
@@ -50,4 +53,5 @@ test {
     _ = push.sender;
     _ = agent_card;
     _ = execution;
+    _ = handler;
 }
