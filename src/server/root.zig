@@ -12,6 +12,14 @@ pub const task_store = struct {
     pub const TaskVersion = store.TaskVersion;
     pub const InMemoryTaskStore = inmemory.InMemoryTaskStore;
 };
+pub const push = struct {
+    pub const store = @import("push/store.zig");
+    pub const sender = @import("push/sender.zig");
+    pub const PushConfigStore = store.PushConfigStore;
+    pub const InMemoryPushConfigStore = store.InMemoryPushConfigStore;
+    pub const HttpPushSender = sender.HttpPushSender;
+    pub const HttpPushSenderConfig = sender.Config;
+};
 
 pub const User = middleware.User;
 pub const ServiceParams = middleware.ServiceParams;
@@ -21,6 +29,10 @@ pub const ExecutorContext = executor.ExecutorContext;
 pub const TaskStore = task_store.TaskStore;
 pub const TaskVersion = task_store.TaskVersion;
 pub const InMemoryTaskStore = task_store.InMemoryTaskStore;
+pub const PushConfigStore = push.PushConfigStore;
+pub const InMemoryPushConfigStore = push.InMemoryPushConfigStore;
+pub const HttpPushSender = push.HttpPushSender;
+pub const HttpPushSenderConfig = push.HttpPushSenderConfig;
 pub const AgentCardProducer = agent_card.AgentCardProducer;
 pub const StaticAgentCard = agent_card.StaticAgentCard;
 pub const AgentCardHandler = agent_card.Handler;
@@ -34,6 +46,8 @@ test {
     _ = executor;
     _ = task_store.store;
     _ = task_store.inmemory;
+    _ = push.store;
+    _ = push.sender;
     _ = agent_card;
     _ = execution;
 }
