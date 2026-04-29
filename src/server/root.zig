@@ -7,6 +7,7 @@ pub const agent_card = @import("agent_card.zig");
 pub const execution = @import("execution.zig");
 pub const handler = @import("handler.zig");
 pub const sse = @import("sse.zig");
+pub const jsonrpc = @import("jsonrpc.zig");
 pub const task_store = struct {
     pub const store = @import("task_store/store.zig");
     pub const inmemory = @import("task_store/inmemory.zig");
@@ -56,4 +57,5 @@ test {
     _ = execution;
     _ = handler;
     _ = sse;
+    _ = jsonrpc;
 }
