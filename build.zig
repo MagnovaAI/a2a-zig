@@ -1,0 +1,104 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // ---- Foundation libraries (vendored — no third-party deps) ----
+    const sysclock_mod = b.addModule("sysclock", .{
+        .root_source_file = b.path("lib/sysclock/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sysclock_mod.link_libc = true;
+
+    // Upstream UUID library (alexrios/uuid). Used directly — no wrapper.
+    const uuid_dep = b.dependency("uuid", .{ .target = target, .optimize = optimize });
+    const uuid_mod = uuid_dep.module("uuid");
+
+    // Linter (rockorager/ziglint). Run via `zig build lint`.
+    // Upstream pins Zig 0.15.2 in its own build.zig and won't compile under
+    // 0.16, so we shell out to a `ziglint` on PATH instead of consuming it as
+    // a build-graph dependency. Install with:
+    //   zig build install -- (in a clone of rockorager/ziglint, on a 0.15.2)
+    // or `nix run github:rockorager/ziglint -- <args>`.
+    const lint_run = b.addSystemCommand(&.{"ziglint"});
+    if (b.args) |args| lint_run.addArgs(args);
+    const lint_step = b.step("lint", "Run ziglint over the project (requires `ziglint` on PATH)");
+    lint_step.dependOn(&lint_run.step);
+
+    // ---- Modules ----
+    const a2a_mod = b.addModule("a2a", .{
+        .root_source_file = b.path("src/a2a/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    a2a_mod.addImport("uuid", uuid_mod);
+    a2a_mod.addImport("sysclock", sysclock_mod);
+
+    const client_mod = b.addModule("a2a_client", .{
+        .root_source_file = b.path("src/client/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    client_mod.addImport("a2a", a2a_mod);
+
+    const server_mod = b.addModule("a2a_server", .{
+        .root_source_file = b.path("src/server/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    server_mod.addImport("a2a", a2a_mod);
+
+    // ---- CLI executable ----
+    const cli_exe = b.addExecutable(.{
+        .name = "a2a",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cli/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "a2a", .module = a2a_mod },
+                .{ .name = "a2a_client", .module = client_mod },
+                .{ .name = "a2a_server", .module = server_mod },
+            },
+        }),
+    });
+    b.installArtifact(cli_exe);
+
+    const run_cli = b.addRunArtifact(cli_exe);
+    if (b.args) |args| run_cli.addArgs(args);
+    const run_step = b.step("run", "Run the CLI");
+    run_step.dependOn(&run_cli.step);
+
+    // ---- Hello-world example ----
+    const hello_exe = b.addExecutable(.{
+        .name = "helloworld",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/helloworld/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "a2a", .module = a2a_mod },
+                .{ .name = "a2a_client", .module = client_mod },
+                .{ .name = "a2a_server", .module = server_mod },
+            },
+        }),
+    });
+    b.installArtifact(hello_exe);
+
+    // ---- Tests ----
+    const test_step = b.step("test", "Run all unit tests");
+
+    const sysclock_tests = b.addTest(.{ .root_module = sysclock_mod });
+    test_step.dependOn(&b.addRunArtifact(sysclock_tests).step);
+
+    const a2a_tests = b.addTest(.{ .root_module = a2a_mod });
+    test_step.dependOn(&b.addRunArtifact(a2a_tests).step);
+
+    const client_tests = b.addTest(.{ .root_module = client_mod });
+    test_step.dependOn(&b.addRunArtifact(client_tests).step);
+
+    const server_tests = b.addTest(.{ .root_module = server_mod });
+    test_step.dependOn(&b.addRunArtifact(server_tests).step);
+}

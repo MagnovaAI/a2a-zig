@@ -1,0 +1,12 @@
+.{
+    .paths = .{
+        "src",
+        "lib",
+        "examples",
+        "build.zig",
+    },
+    .rules = .{
+        // Match A2A wire format: JSON keys are camelCase, but Zig field names
+        // are snake_case (Z006). Stay strict on identifier conventions.
+    },
+}

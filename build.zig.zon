@@ -1,0 +1,20 @@
+.{
+    .name = .a2a,
+    .version = "0.1.0",
+    .fingerprint = 0x61917dba7b7bf1a4,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+        "README.md",
+        "LICENSE",
+    },
+    .dependencies = .{
+        .uuid = .{
+            .url = "https://github.com/alexrios/uuid/archive/ac4752a42b01a798e87a4e21c7feb32c2f425dc0.tar.gz",
+            .hash = "uuid-2.0.0-ZJ5KhqUyAQCmuZfMn6DUOueobfz7YmlJhjKtOdaSo1ZL",
+        },
+    },
+}
