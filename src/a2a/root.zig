@@ -1,5 +1,4 @@
 //! a2a — A2A v1 protocol types and core definitions.
-//! Mirrors `a2a-rs/a2a/src/lib.rs`.
 const std = @import("std");
 
 pub const errors = @import("errors.zig");

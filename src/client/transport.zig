@@ -1,16 +1,17 @@
-//! Transport vtable + factory traits. Mirrors `a2a-rs/a2a-client/src/transport.rs`.
+//! Transport vtable and factory interface.
 //!
-//! Zig translation notes:
-//!   * Rust `trait Transport + async fn ...` → vtable struct of function pointers.
-//!     The first argument is `*anyopaque` (the underlying state) and the
-//!     remaining arguments mirror the Rust signatures. The wrapping `Transport`
-//!     struct holds the state + vtable and provides typed dispatch methods.
-//!   * Rust `BoxStream<'static, Result<StreamResponse, A2AError>>` → an
-//!     iterator object (`StreamIterator`) with `next` / `deinit` function
-//!     pointers — caller drives it by calling `next` until it returns null.
-//!   * Async is handled at the call site; the vtable is sync. When we land
-//!     real HTTP, the per-method functions either block or run on a worker
-//!     pool; the public API stays the same.
+//! Design notes:
+//!   * Each method dispatches through a vtable of function pointers. The first
+//!     argument is `*anyopaque` (the underlying state); the remaining
+//!     arguments mirror the protocol method signatures. The wrapping
+//!     `Transport` struct holds the state + vtable and provides typed
+//!     dispatch methods.
+//!   * Streaming responses use a pull-based `StreamIterator` with `next` and
+//!     `deinit` function pointers — the caller drives it by calling `next`
+//!     until it returns null.
+//!   * Async handling lives at the call site; the vtable itself is sync.
+//!     When real HTTP lands, the per-method functions either block or run on
+//!     a worker pool; the public API stays the same.
 const std = @import("std");
 const a2a = @import("a2a");
 

@@ -1,8 +1,6 @@
-//! Client factory and transport registry. Mirrors
-//! `a2a-rs/a2a-client/src/factory.rs` but stops short of constructing the
-//! high-level client — that lives in `client.zig`. The factory's job here is
-//! to register `TransportFactory` implementations and pick the best match for
-//! an `AgentCard`.
+//! Client factory and transport registry. Registers `TransportFactory`
+//! implementations and picks the best match for an `AgentCard`. The
+//! high-level client itself lives in `client.zig`.
 const std = @import("std");
 const a2a = @import("a2a");
 const transport = @import("transport.zig");
@@ -160,7 +158,7 @@ pub const A2AClientFactory = struct {
                 .allocator = allocator,
                 .preferred_bindings = .init(allocator),
             };
-            // Defaults match the Rust SDK: prefer JSON-RPC, then REST.
+            // Defaults: prefer JSON-RPC, fall back to REST.
             b.preferred_bindings.append(allocator.dupe(u8, a2a.TRANSPORT_PROTOCOL_JSONRPC) catch unreachable) catch unreachable;
             b.preferred_bindings.append(allocator.dupe(u8, a2a.TRANSPORT_PROTOCOL_HTTP_JSON) catch unreachable) catch unreachable;
             return b;

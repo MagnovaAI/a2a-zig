@@ -1,4 +1,4 @@
-//! A2A protocol errors. Mirrors `a2a-rs/a2a/src/errors.rs` 1:1.
+//! A2A protocol errors.
 const std = @import("std");
 const jsonrpc = @import("jsonrpc.zig");
 

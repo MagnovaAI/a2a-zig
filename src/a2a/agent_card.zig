@@ -1,4 +1,4 @@
-//! Agent self-description manifest. Mirrors `a2a-rs/a2a/src/agent_card.rs` 1:1.
+//! Agent self-description manifest.
 const std = @import("std");
 const types = @import("types.zig");
 const errors_mod = @import("errors.zig");
@@ -189,7 +189,7 @@ pub const AgentInterface = struct {
 
     pub fn jsonStringify(self: AgentInterface, jw: anytype) !void {
         try jw.beginObject();
-        // Apply gRPC normalization on the wire form too (matches Rust's `wire_url`).
+        // Apply gRPC normalization on the wire form too — matches `init`.
         try jw.objectField("url");
         if (std.ascii.eqlIgnoreCase(self.protocol_binding, TRANSPORT_PROTOCOL_GRPC)) {
             const prefix = "http://";
@@ -438,7 +438,7 @@ pub const SecurityRequirement = struct {
         try jw.endObject();
     }
 
-    /// Accepts three wire shapes (matches the Rust loose deserializer):
+    /// Accepts three legacy wire shapes for backwards compatibility:
     ///   1. `{"scheme": ["scope1", ...], ...}`
     ///   2. `{"schemes": {"scheme": [...], ...}}`
     ///   3. `{"schemes": {"scheme": {"list": [...]}, ...}}`
@@ -1763,7 +1763,7 @@ test "agent_interface init preserves grpc https" {
     try testing.expectEqualStrings("https://localhost:50051", iface.url);
 }
 
-test "agent_interface serde normalizes grpc http with tenant" {
+test "agent_interface normalizes grpc http with tenant" {
     const a = testing.allocator;
     var iface = AgentInterface{
         .url = try a.dupe(u8, "http://localhost:50051"),
@@ -1797,7 +1797,7 @@ test "agent_capabilities default" {
     try testing.expect(caps.extended_agent_card == null);
 }
 
-test "security_scheme apikey serde" {
+test "security_scheme apikey roundtrip" {
     const a = testing.allocator;
     var ss = SecurityScheme{ .api_key = .{
         .location = try a.dupe(u8, "header"),
@@ -1815,7 +1815,7 @@ test "security_scheme apikey serde" {
     try testing.expect(back == .api_key);
 }
 
-test "security_scheme httpauth serde" {
+test "security_scheme httpauth roundtrip" {
     const a = testing.allocator;
     var ss = SecurityScheme{ .http_auth = .{
         .scheme = try a.dupe(u8, "Bearer"),
@@ -1833,7 +1833,7 @@ test "security_scheme httpauth serde" {
     try testing.expect(back == .http_auth);
 }
 
-test "security_scheme oauth2 serde with client credentials" {
+test "security_scheme oauth2 with client credentials" {
     const a = testing.allocator;
     var scopes: StringMap = .{ .allocator = a };
     try scopes.entries.put(a, try a.dupe(u8, "read"), try a.dupe(u8, "Read access"));
@@ -1857,7 +1857,7 @@ test "security_scheme oauth2 serde with client credentials" {
     try testing.expect(back.oauth2.flows == .client_credentials);
 }
 
-test "security_scheme openidconnect serde" {
+test "security_scheme openidconnect roundtrip" {
     const a = testing.allocator;
     var ss = SecurityScheme{ .openid_connect = .{
         .open_id_connect_url = try a.dupe(u8, "https://example.com/.well-known/openid-configuration"),
@@ -1873,7 +1873,7 @@ test "security_scheme openidconnect serde" {
     try testing.expect(back == .openid_connect);
 }
 
-test "security_scheme mtls serde" {
+test "security_scheme mtls roundtrip" {
     const a = testing.allocator;
     var ss = SecurityScheme{ .mtls = .{
         .description = try a.dupe(u8, "mTLS auth"),
@@ -1938,7 +1938,7 @@ test "oauth_flows authorization_code roundtrip" {
     try testing.expectEqual(@as(?bool, true), back.authorization_code.pkce_required);
 }
 
-test "agent_card minimal serde" {
+test "agent_card minimal roundtrip" {
     const a = testing.allocator;
     const ifaces = try a.alloc(AgentInterface, 1);
     ifaces[0] = try AgentInterface.init(a, "http://localhost:3000", "JSONRPC");

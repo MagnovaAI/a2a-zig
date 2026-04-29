@@ -1,4 +1,4 @@
-//! Streaming event types. Mirrors `a2a-rs/a2a/src/event.rs` 1:1.
+//! Streaming event types for the A2A protocol.
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -265,7 +265,7 @@ fn parseValueOwned(allocator: std.mem.Allocator, json: []const u8) !std.json.Par
     return std.json.parseFromSlice(std.json.Value, allocator, json, .{});
 }
 
-test "stream_response status_update serde" {
+test "stream_response status_update roundtrip" {
     const a = testing.allocator;
     var event = StreamResponse{
         .status_update = .{
@@ -288,7 +288,7 @@ test "stream_response status_update serde" {
     try testing.expect(back == .status_update);
 }
 
-test "stream_response task serde" {
+test "stream_response task roundtrip" {
     const a = testing.allocator;
     var event = StreamResponse{
         .task = .{
@@ -309,7 +309,7 @@ test "stream_response task serde" {
     try testing.expect(back == .task);
 }
 
-test "stream_response message serde" {
+test "stream_response message roundtrip" {
     const a = testing.allocator;
     const parts = try a.alloc(Part, 1);
     parts[0] = try Part.text(a, "hello");
@@ -327,7 +327,7 @@ test "stream_response message serde" {
     try testing.expect(back == .message);
 }
 
-test "stream_response artifact_update serde" {
+test "stream_response artifact_update roundtrip" {
     const a = testing.allocator;
     var event = StreamResponse{
         .artifact_update = .{

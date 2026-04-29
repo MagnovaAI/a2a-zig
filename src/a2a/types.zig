@@ -1,4 +1,4 @@
-//! Core protocol data types. Mirrors `a2a-rs/a2a/src/types.rs` 1:1.
+//! Core protocol data types.
 //!
 //! Memory model:
 //!   * Strings and slices are heap-owned; every type stores its `allocator`
@@ -242,7 +242,7 @@ pub const UnknownVariant = struct {
 
 pub const PartContentTag = enum { text, raw, url, data };
 
-/// A part's content — discriminated union mirroring the Rust enum.
+/// A part's content — discriminated by which field is present on the wire.
 pub const PartContent = union(PartContentTag) {
     text: []const u8,
     raw: []const u8,
@@ -451,7 +451,7 @@ pub const Part = struct {
 };
 
 // ---------------------------------------------------------------------------
-// String list helper (snake_case Rust `Vec<String>`)
+// String list helpers
 // ---------------------------------------------------------------------------
 
 fn freeStrSlice(allocator: std.mem.Allocator, slice: []const []const u8) void {
@@ -647,7 +647,7 @@ pub const Message = struct {
 pub const TaskStatus = struct {
     state: TaskState = .unspecified,
     message: ?Message = null,
-    /// RFC3339 timestamp string (matches chrono `DateTime<Utc>` default serialization).
+    /// RFC3339 timestamp string in UTC.
     timestamp: ?[]const u8 = null,
     allocator: std.mem.Allocator,
 
@@ -1796,7 +1796,7 @@ fn parseValueOwned(allocator: std.mem.Allocator, json: []const u8) !std.json.Par
     return std.json.parseFromSlice(std.json.Value, allocator, json, .{});
 }
 
-test "task_state serde" {
+test "task_state roundtrip" {
     const a = testing.allocator;
     const json = try std.json.Stringify.valueAlloc(a, TaskState.completed, .{});
     defer a.free(json);
@@ -1808,7 +1808,7 @@ test "task_state serde" {
     try testing.expectEqual(TaskState.completed, back);
 }
 
-test "role serde" {
+test "role roundtrip" {
     const a = testing.allocator;
     const json = try std.json.Stringify.valueAlloc(a, Role.agent, .{});
     defer a.free(json);
@@ -1819,7 +1819,7 @@ test "role serde" {
     try testing.expectEqual(Role.agent, back);
 }
 
-test "part text serde" {
+test "part text roundtrip" {
     const a = testing.allocator;
     var part = try Part.text(a, "hello");
     defer part.deinit();
@@ -1836,7 +1836,7 @@ test "part text serde" {
     try testing.expectEqualStrings("hello", back.content.text);
 }
 
-test "part raw serde" {
+test "part raw roundtrip" {
     const a = testing.allocator;
     const bytes = [_]u8{ 1, 2, 3 };
     var part = try Part.raw(a, &bytes);
@@ -1850,7 +1850,7 @@ test "part raw serde" {
     try testing.expectEqualSlices(u8, &bytes, back.content.raw);
 }
 
-test "part url serde" {
+test "part url roundtrip" {
     const a = testing.allocator;
     var part = try Part.url(a, "https://example.com/file.pdf");
     defer part.deinit();
@@ -1864,7 +1864,7 @@ test "part url serde" {
     try testing.expect(back.content == .url);
 }
 
-test "part data serde" {
+test "part data roundtrip" {
     const a = testing.allocator;
     const arena = try a.create(std.heap.ArenaAllocator);
     arena.* = std.heap.ArenaAllocator.init(a);
@@ -1921,7 +1921,7 @@ test "message new and text" {
     try testing.expectEqualStrings("hi", msg.text().?);
 }
 
-test "message serde" {
+test "message roundtrip" {
     const a = testing.allocator;
     const parts = try a.alloc(Part, 1);
     parts[0] = try Part.text(a, "response");
@@ -1966,7 +1966,7 @@ test "task_state is_terminal" {
     try testing.expect(!TaskState.unspecified.isTerminal());
 }
 
-test "task full serde" {
+test "task full roundtrip" {
     const a = testing.allocator;
     // status.message
     const status_parts = try a.alloc(Part, 1);
@@ -2011,7 +2011,7 @@ test "task full serde" {
     try testing.expect(back.history != null);
 }
 
-test "push_notification_config serde" {
+test "push_notification_config roundtrip" {
     const a = testing.allocator;
     var cfg = PushNotificationConfig{
         .url = try a.dupe(u8, "https://example.com/webhook"),
@@ -2037,7 +2037,7 @@ test "push_notification_config serde" {
     try testing.expectEqualStrings(cfg.authentication.?.scheme, back.authentication.?.scheme);
 }
 
-test "send_message_request serde" {
+test "send_message_request roundtrip" {
     const a = testing.allocator;
     const parts = try a.alloc(Part, 1);
     parts[0] = try Part.text(a, "hello");
@@ -2146,7 +2146,7 @@ test "task_state default" {
     try testing.expectEqual(TaskState.unspecified, TaskState.default());
 }
 
-test "list_tasks_request serde" {
+test "list_tasks_request roundtrip" {
     const a = testing.allocator;
     var req = ListTasksRequest{
         .context_id = try a.dupe(u8, "c1"),
@@ -2171,7 +2171,7 @@ test "list_tasks_request serde" {
     try testing.expectEqual(req.include_artifacts, back.include_artifacts);
 }
 
-test "cancel_task_request serde" {
+test "cancel_task_request roundtrip" {
     const a = testing.allocator;
     var req = CancelTaskRequest{
         .id = try a.dupe(u8, "t1"),
@@ -2190,7 +2190,7 @@ test "cancel_task_request serde" {
     try testing.expectEqualStrings(req.tenant.?, back.tenant.?);
 }
 
-test "subscribe_to_task_request serde" {
+test "subscribe_to_task_request roundtrip" {
     const a = testing.allocator;
     var req = SubscribeToTaskRequest{
         .id = try a.dupe(u8, "t1"),
@@ -2206,7 +2206,7 @@ test "subscribe_to_task_request serde" {
     try testing.expectEqualStrings(req.id, back.id);
 }
 
-test "role all variants serde" {
+test "role all variants roundtrip" {
     const a = testing.allocator;
     const cases = [_]struct { Role, []const u8 }{
         .{ .unspecified, "\"ROLE_UNSPECIFIED\"" },
@@ -2228,7 +2228,7 @@ test "role all variants serde" {
     try testing.expectEqual(Role.unspecified, back);
 }
 
-test "task_state all variants serde" {
+test "task_state all variants roundtrip" {
     const a = testing.allocator;
     const cases = [_]struct { TaskState, []const u8 }{
         .{ .unspecified, "TASK_STATE_UNSPECIFIED" },

@@ -1,4 +1,4 @@
-//! Client-level call interceptors. Mirrors `a2a-rs/a2a-client/src/middleware.rs`.
+//! Client-level call interceptors.
 const std = @import("std");
 const a2a = @import("a2a");
 const transport = @import("transport.zig");
@@ -21,7 +21,7 @@ pub const CallResult = union(enum) {
 ///
 /// Concrete interceptors implement this vtable. The container that drives them
 /// is responsible for calling `before` in registration order and `after` in
-/// reverse — matching the Rust trait's documented semantics.
+/// reverse — so wrappers nest cleanly around the call.
 pub const CallInterceptor = struct {
     pub const Error = error{ OutOfMemory, InterceptorFailed };
 

@@ -123,9 +123,8 @@ pub fn protoValueToJson(allocator: std.mem.Allocator, v: wkt.Value) ConvError!st
         .bool_value => |b| std.json.Value{ .bool = b },
         .number_value => |f| blk: {
             // Preserve integers exactly when the float has no fractional part
-            // and fits in i53 (f64's safe-integer range) — matches the Rust
-            // deserializer's behavior. i64 boundaries don't round-trip
-            // through f64, so we use the broader-but-exact 2^53 cap.
+            // and fits in f64's safe-integer range (±2^53). i64 boundaries
+            // don't round-trip through f64, so we cap at 2^53.
             const safe_max: f64 = 9_007_199_254_740_992.0; // 2^53
             if (@floor(f) == f and f >= -safe_max and f <= safe_max) {
                 break :blk std.json.Value{ .integer = @intFromFloat(f) };
@@ -197,10 +196,10 @@ pub fn metadataFromProto(
 // Timestamp <-> ?[]const u8 (RFC3339)
 // ---------------------------------------------------------------------------
 //
-// Rust uses `chrono::DateTime<Utc>` natively. We carry the wire timestamp as
-// an RFC3339 string (with `zeit` as the parser/formatter when callers want
-// structured access). The proto representation is `google.protobuf.Timestamp`
-// with `seconds` + `nanos`.
+// The native side carries the wire timestamp as an RFC3339 string (with
+// `zeit` as the parser/formatter when callers want structured access). The
+// proto representation is `google.protobuf.Timestamp` with `seconds` +
+// `nanos`.
 
 pub fn timestampToProto(
     _: std.mem.Allocator,
@@ -478,8 +477,8 @@ pub fn partFromProto(allocator: std.mem.Allocator, src: v1.Part) !a2a.Part {
             part.content = .{ .data = .{ .value = cloned, .arena = arena } };
         },
     } else {
-        // No oneof set on the wire — collapse to an empty text part. Matches
-        // the Rust converter's behavior.
+        // No oneof set on the wire — collapse to an empty text part rather
+        // than failing the whole decode.
         part.content = .{ .text = try allocator.dupe(u8, "") };
     }
     errdefer part.content.deinit(allocator);
@@ -948,8 +947,8 @@ pub fn sendMessageRequestFromProto(
     const msg = if (src.message) |m|
         try messageFromProto(allocator, m)
     else
-        // Wire allows omitted message; collapse to empty user message to
-        // match the Rust converter's permissive behavior.
+        // Wire allows the message field to be absent; collapse to an empty
+        // user message rather than failing the decode.
         try a2a.Message.init(allocator, .user, try allocator.alloc(a2a.Part, 0));
 
     var out: a2a.SendMessageRequest = .{

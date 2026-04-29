@@ -1,5 +1,4 @@
-//! Authentication credentials store + interceptor. Mirrors
-//! `a2a-rs/a2a-client/src/auth.rs`.
+//! Authentication credentials store and interceptor.
 const std = @import("std");
 const a2a = @import("a2a");
 const transport = @import("transport.zig");
@@ -38,10 +37,9 @@ pub const CredentialsStore = struct {
 
 /// Simple in-memory credentials store backed by a hash map.
 ///
-/// The Rust counterpart wraps the map in a `RwLock`. We keep a plain map and
-/// document the contract: this store is not thread-safe; wrap externally if
-/// you need concurrent mutation. The common usage pattern (set credentials at
-/// startup, read them per-request) is fine without locking on the read path.
+/// This store is not thread-safe; wrap externally if you need concurrent
+/// mutation. The common usage pattern (set credentials at startup, read them
+/// per-request) is fine without locking on the read path.
 pub const InMemoryCredentialsStore = struct {
     entries: std.StringArrayHashMapUnmanaged([]const u8) = .empty,
     allocator: std.mem.Allocator,

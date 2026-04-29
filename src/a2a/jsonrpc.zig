@@ -1,4 +1,4 @@
-//! JSON-RPC 2.0 envelope types. Mirrors `a2a-rs/a2a/src/jsonrpc.rs` 1:1.
+//! JSON-RPC 2.0 envelope types.
 const std = @import("std");
 
 /// JSON-RPC ID — string, integer, or null.

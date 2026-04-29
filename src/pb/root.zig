@@ -1,4 +1,4 @@
-//! a2a-pb — protobuf-backed wire types and ProtoJSON conversion for A2A.
+//! Protobuf-backed wire types and ProtoJSON conversion for A2A.
 //!
 //! `gen/` holds the protobuf bindings produced by `zig build gen-proto` from
 //! `proto/a2a.proto`. Each generated message exposes `encode`/`decode` for
