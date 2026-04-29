@@ -9,6 +9,7 @@ pub const handler = @import("handler.zig");
 pub const sse = @import("sse.zig");
 pub const jsonrpc = @import("jsonrpc.zig");
 pub const rest = @import("rest.zig");
+pub const tls = @import("tls.zig");
 pub const task_store = struct {
     pub const store = @import("task_store/store.zig");
     pub const inmemory = @import("task_store/inmemory.zig");
@@ -60,4 +61,5 @@ test {
     _ = sse;
     _ = jsonrpc;
     _ = rest;
+    _ = tls;
 }
