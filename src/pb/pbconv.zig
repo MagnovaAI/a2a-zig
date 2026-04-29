@@ -873,6 +873,278 @@ pub fn listTaskPushNotificationConfigsResponseFromProto(
 }
 
 // ---------------------------------------------------------------------------
+// SendMessageConfiguration
+// ---------------------------------------------------------------------------
+
+pub fn sendMessageConfigurationToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SendMessageConfiguration,
+) !v1.SendMessageConfiguration {
+    var task_pnc: ?v1.TaskPushNotificationConfig = null;
+    if (src.push_notification_config) |pnc| {
+        task_pnc = .{
+            .tenant = &.{},
+            .id = try optStrToProto(allocator, pnc.id),
+            .task_id = &.{},
+            .url = try allocator.dupe(u8, pnc.url),
+            .token = try optStrToProto(allocator, pnc.token),
+            .authentication = if (pnc.authentication) |auth|
+                try authenticationInfoToProto(allocator, auth)
+            else
+                null,
+        };
+    }
+    return .{
+        .accepted_output_modes = try strListToProto(allocator, src.accepted_output_modes),
+        .task_push_notification_config = task_pnc,
+        .history_length = src.history_length,
+        .return_immediately = src.return_immediately orelse false,
+    };
+}
+
+pub fn sendMessageConfigurationFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SendMessageConfiguration,
+) !a2a.SendMessageConfiguration {
+    var out: a2a.SendMessageConfiguration = .{ .allocator = allocator };
+    errdefer out.deinit();
+    if (try strListFromProto(allocator, src.accepted_output_modes)) |arr| out.accepted_output_modes = arr;
+    if (src.task_push_notification_config) |tpnc| {
+        var pnc = a2a.PushNotificationConfig{
+            .url = try allocator.dupe(u8, tpnc.url),
+            .allocator = allocator,
+        };
+        errdefer pnc.deinit();
+        if (try optStrFromProto(allocator, tpnc.id)) |s| pnc.id = s;
+        if (try optStrFromProto(allocator, tpnc.token)) |s| pnc.token = s;
+        if (tpnc.authentication) |auth| pnc.authentication = try authenticationInfoFromProto(allocator, auth);
+        out.push_notification_config = pnc;
+    }
+    if (src.history_length) |n| out.history_length = n;
+    out.return_immediately = src.return_immediately;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SendMessageRequest
+// ---------------------------------------------------------------------------
+
+pub fn sendMessageRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SendMessageRequest,
+) !v1.SendMessageRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .message = try messageToProto(allocator, src.message),
+        .configuration = if (src.configuration) |c| try sendMessageConfigurationToProto(allocator, c) else null,
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn sendMessageRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SendMessageRequest,
+) !a2a.SendMessageRequest {
+    const msg = if (src.message) |m|
+        try messageFromProto(allocator, m)
+    else
+        // Wire allows omitted message; collapse to empty user message to
+        // match the Rust converter's permissive behavior.
+        try a2a.Message.init(allocator, .user, try allocator.alloc(a2a.Part, 0));
+
+    var out: a2a.SendMessageRequest = .{
+        .message = msg,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    if (src.configuration) |c| out.configuration = try sendMessageConfigurationFromProto(allocator, c);
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// GetTaskRequest
+// ---------------------------------------------------------------------------
+
+pub fn getTaskRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.GetTaskRequest,
+) !v1.GetTaskRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .id = try allocator.dupe(u8, src.id),
+        .history_length = src.history_length,
+    };
+}
+
+pub fn getTaskRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.GetTaskRequest,
+) !a2a.GetTaskRequest {
+    var out: a2a.GetTaskRequest = .{
+        .id = try allocator.dupe(u8, src.id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    if (src.history_length) |n| out.history_length = n;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// ListTasksRequest / ListTasksResponse
+// ---------------------------------------------------------------------------
+
+pub fn listTasksRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.ListTasksRequest,
+) !v1.ListTasksRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .context_id = try optStrToProto(allocator, src.context_id),
+        .status = if (src.status) |s| taskStateToProto(s) else .TASK_STATE_UNSPECIFIED,
+        .page_size = src.page_size,
+        .page_token = try optStrToProto(allocator, src.page_token),
+        .history_length = src.history_length,
+        .status_timestamp_after = try timestampToProto(allocator, src.status_timestamp_after),
+        .include_artifacts = src.include_artifacts,
+    };
+}
+
+pub fn listTasksRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ListTasksRequest,
+) !a2a.ListTasksRequest {
+    var out: a2a.ListTasksRequest = .{ .allocator = allocator };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    if (try optStrFromProto(allocator, src.context_id)) |s| out.context_id = s;
+    if (src.status != .TASK_STATE_UNSPECIFIED) out.status = taskStateFromProto(src.status);
+    if (src.page_size) |n| out.page_size = n;
+    if (try optStrFromProto(allocator, src.page_token)) |s| out.page_token = s;
+    if (src.history_length) |n| out.history_length = n;
+    if (try timestampFromProto(allocator, src.status_timestamp_after)) |s| out.status_timestamp_after = s;
+    if (src.include_artifacts) |b| out.include_artifacts = b;
+    return out;
+}
+
+pub fn listTasksResponseToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.ListTasksResponse,
+) !v1.ListTasksResponse {
+    var tasks: std.ArrayList(v1.Task) = .empty;
+    try tasks.ensureTotalCapacityPrecise(allocator, src.tasks.len);
+    for (src.tasks) |t| tasks.appendAssumeCapacity(try taskToProto(allocator, t));
+    return .{
+        .tasks = tasks,
+        .next_page_token = try allocator.dupe(u8, src.next_page_token),
+        .page_size = src.page_size,
+        .total_size = src.total_size,
+    };
+}
+
+pub fn listTasksResponseFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ListTasksResponse,
+) !a2a.ListTasksResponse {
+    const tasks = try allocator.alloc(a2a.Task, src.tasks.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (tasks[0..i]) |*t| t.deinit();
+        allocator.free(tasks);
+    }
+    while (i < src.tasks.items.len) : (i += 1) tasks[i] = try taskFromProto(allocator, src.tasks.items[i]);
+
+    return .{
+        .tasks = tasks,
+        .next_page_token = try allocator.dupe(u8, src.next_page_token),
+        .page_size = src.page_size,
+        .total_size = src.total_size,
+        .allocator = allocator,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// CancelTaskRequest
+// ---------------------------------------------------------------------------
+
+pub fn cancelTaskRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.CancelTaskRequest,
+) !v1.CancelTaskRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .id = try allocator.dupe(u8, src.id),
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn cancelTaskRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.CancelTaskRequest,
+) !a2a.CancelTaskRequest {
+    var out: a2a.CancelTaskRequest = .{
+        .id = try allocator.dupe(u8, src.id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SubscribeToTaskRequest
+// ---------------------------------------------------------------------------
+
+pub fn subscribeToTaskRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SubscribeToTaskRequest,
+) !v1.SubscribeToTaskRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .id = try allocator.dupe(u8, src.id),
+    };
+}
+
+pub fn subscribeToTaskRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SubscribeToTaskRequest,
+) !a2a.SubscribeToTaskRequest {
+    var out: a2a.SubscribeToTaskRequest = .{
+        .id = try allocator.dupe(u8, src.id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// GetExtendedAgentCardRequest
+// ---------------------------------------------------------------------------
+
+pub fn getExtendedAgentCardRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.GetExtendedAgentCardRequest,
+) !v1.GetExtendedAgentCardRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+    };
+}
+
+pub fn getExtendedAgentCardRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.GetExtendedAgentCardRequest,
+) !a2a.GetExtendedAgentCardRequest {
+    var out: a2a.GetExtendedAgentCardRequest = .{ .allocator = allocator };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -1265,6 +1537,185 @@ test "list task push notification request page params round-trip" {
     defer back.deinit();
     try testing.expectEqual(@as(?i32, 25), back.page_size);
     try testing.expectEqualStrings("tok", back.page_token.?);
+}
+
+test "send message configuration round-trips" {
+    const a = testing.allocator;
+    const modes = try a.alloc([]const u8, 1);
+    modes[0] = try a.dupe(u8, "text/plain");
+    var native = a2a.SendMessageConfiguration{
+        .accepted_output_modes = modes,
+        .history_length = 10,
+        .return_immediately = true,
+        .push_notification_config = .{
+            .url = try a.dupe(u8, "https://example.com/hook"),
+            .id = try a.dupe(u8, "cfg1"),
+            .allocator = a,
+        },
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try sendMessageConfigurationToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(?i32, 10), proto.history_length);
+    try testing.expectEqual(true, proto.return_immediately);
+    try testing.expect(proto.task_push_notification_config != null);
+    try testing.expectEqualStrings("https://example.com/hook", proto.task_push_notification_config.?.url);
+
+    var back = try sendMessageConfigurationFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(@as(?i32, 10), back.history_length);
+    try testing.expectEqualStrings("https://example.com/hook", back.push_notification_config.?.url);
+}
+
+test "send message request round-trips" {
+    const a = testing.allocator;
+    const parts = try a.alloc(a2a.Part, 1);
+    parts[0] = try a2a.Part.text(a, "hello");
+    var native = a2a.SendMessageRequest{
+        .message = try a2a.Message.init(a, .user, parts),
+        .tenant = try a.dupe(u8, "tenant-1"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try sendMessageRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try sendMessageRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("tenant-1", back.tenant.?);
+    try testing.expectEqual(a2a.Role.user, back.message.role);
+    try testing.expectEqual(@as(usize, 1), back.message.parts.len);
+}
+
+test "send message request with missing message decodes to empty user message" {
+    const a = testing.allocator;
+    var proto = v1.SendMessageRequest{
+        .tenant = &.{},
+        .message = null,
+    };
+    defer proto.deinit(a);
+
+    var back = try sendMessageRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(a2a.Role.user, back.message.role);
+    try testing.expectEqual(@as(usize, 0), back.message.parts.len);
+}
+
+test "get task request round-trips" {
+    const a = testing.allocator;
+    var native = a2a.GetTaskRequest{
+        .id = try a.dupe(u8, "t1"),
+        .history_length = 5,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try getTaskRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try getTaskRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.id);
+    try testing.expectEqual(@as(?i32, 5), back.history_length);
+}
+
+test "list tasks request status filter round-trips" {
+    const a = testing.allocator;
+    var native = a2a.ListTasksRequest{
+        .context_id = try a.dupe(u8, "c1"),
+        .status = .working,
+        .page_size = 50,
+        .include_artifacts = true,
+        .status_timestamp_after = try a.dupe(u8, "2026-04-29T00:00:00Z"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try listTasksRequestToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(v1.TaskState.TASK_STATE_WORKING, proto.status);
+    try testing.expect(proto.status_timestamp_after != null);
+
+    var back = try listTasksRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("c1", back.context_id.?);
+    try testing.expectEqual(@as(?a2a.TaskState, .working), back.status);
+    try testing.expectEqualStrings("2026-04-29T00:00:00.000Z", back.status_timestamp_after.?);
+}
+
+test "list tasks response carries tasks and paging" {
+    const a = testing.allocator;
+    const tasks = try a.alloc(a2a.Task, 1);
+    tasks[0] = .{
+        .id = try a.dupe(u8, "t1"),
+        .context_id = try a.dupe(u8, "c1"),
+        .status = .{ .state = .completed, .allocator = a },
+        .allocator = a,
+    };
+    var native = a2a.ListTasksResponse{
+        .tasks = tasks,
+        .next_page_token = try a.dupe(u8, "next"),
+        .page_size = 25,
+        .total_size = 137,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try listTasksResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(usize, 1), proto.tasks.items.len);
+    try testing.expectEqual(@as(i32, 25), proto.page_size);
+
+    var back = try listTasksResponseFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("next", back.next_page_token);
+    try testing.expectEqual(@as(i32, 137), back.total_size);
+}
+
+test "cancel and subscribe requests round-trip" {
+    const a = testing.allocator;
+    var cancel = a2a.CancelTaskRequest{
+        .id = try a.dupe(u8, "t1"),
+        .allocator = a,
+    };
+    defer cancel.deinit();
+    var cancel_proto = try cancelTaskRequestToProto(a, cancel);
+    defer cancel_proto.deinit(a);
+    var cancel_back = try cancelTaskRequestFromProto(a, cancel_proto);
+    defer cancel_back.deinit();
+    try testing.expectEqualStrings("t1", cancel_back.id);
+
+    var sub = a2a.SubscribeToTaskRequest{
+        .id = try a.dupe(u8, "t1"),
+        .tenant = try a.dupe(u8, "tenant-1"),
+        .allocator = a,
+    };
+    defer sub.deinit();
+    var sub_proto = try subscribeToTaskRequestToProto(a, sub);
+    defer sub_proto.deinit(a);
+    var sub_back = try subscribeToTaskRequestFromProto(a, sub_proto);
+    defer sub_back.deinit();
+    try testing.expectEqualStrings("t1", sub_back.id);
+    try testing.expectEqualStrings("tenant-1", sub_back.tenant.?);
+}
+
+test "get extended agent card request round-trips" {
+    const a = testing.allocator;
+    var native = a2a.GetExtendedAgentCardRequest{
+        .tenant = try a.dupe(u8, "tenant-1"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try getExtendedAgentCardRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try getExtendedAgentCardRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("tenant-1", back.tenant.?);
 }
 
 test "list task push notification response round-trips" {
