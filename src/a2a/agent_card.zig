@@ -1172,7 +1172,7 @@ pub const PasswordOAuthFlow = struct {
 // OAuthFlows union
 // ---------------------------------------------------------------------------
 
-pub const OAuthFlowsTag = enum { authorization_code, client_credentials, device_code, implicit, password };
+pub const OAuthFlowsTag = enum { authorization_code, client_credentials, device_code, implicit, password, unknown };
 
 pub const OAuthFlows = union(OAuthFlowsTag) {
     authorization_code: AuthorizationCodeOAuthFlow,
@@ -1180,6 +1180,8 @@ pub const OAuthFlows = union(OAuthFlowsTag) {
     device_code: DeviceCodeOAuthFlow,
     implicit: ImplicitOAuthFlow,
     password: PasswordOAuthFlow,
+    /// Forward-compat fallback for variants the local build doesn't recognize.
+    unknown: types.UnknownVariant,
 
     pub fn deinit(self: *OAuthFlows) void {
         switch (self.*) {
@@ -1189,30 +1191,36 @@ pub const OAuthFlows = union(OAuthFlowsTag) {
     }
 
     pub fn jsonStringify(self: OAuthFlows, jw: anytype) !void {
-        try jw.beginObject();
         switch (self) {
-            .authorization_code => |f| {
-                try jw.objectField("authorizationCode");
-                try jw.write(f);
-            },
-            .client_credentials => |f| {
-                try jw.objectField("clientCredentials");
-                try jw.write(f);
-            },
-            .device_code => |f| {
-                try jw.objectField("deviceCode");
-                try jw.write(f);
-            },
-            .implicit => |f| {
-                try jw.objectField("implicit");
-                try jw.write(f);
-            },
-            .password => |f| {
-                try jw.objectField("password");
-                try jw.write(f);
+            .unknown => |u| try jw.write(u),
+            else => {
+                try jw.beginObject();
+                switch (self) {
+                    .authorization_code => |f| {
+                        try jw.objectField("authorizationCode");
+                        try jw.write(f);
+                    },
+                    .client_credentials => |f| {
+                        try jw.objectField("clientCredentials");
+                        try jw.write(f);
+                    },
+                    .device_code => |f| {
+                        try jw.objectField("deviceCode");
+                        try jw.write(f);
+                    },
+                    .implicit => |f| {
+                        try jw.objectField("implicit");
+                        try jw.write(f);
+                    },
+                    .password => |f| {
+                        try jw.objectField("password");
+                        try jw.write(f);
+                    },
+                    .unknown => unreachable,
+                }
+                try jw.endObject();
             },
         }
-        try jw.endObject();
     }
 
     pub fn jsonParseFromValue(
@@ -1239,7 +1247,11 @@ pub const OAuthFlows = union(OAuthFlowsTag) {
         if (obj.get("password")) |v| {
             return .{ .password = try PasswordOAuthFlow.jsonParseFromValue(allocator, v, opts) };
         }
-        return error.UnknownOAuthFlowVariant;
+        var it = obj.iterator();
+        if (it.next()) |entry| {
+            return .{ .unknown = try types.UnknownVariant.init(allocator, entry.key_ptr.*, entry.value_ptr.*) };
+        }
+        return error.UnexpectedToken;
     }
 };
 
@@ -1305,7 +1317,7 @@ pub const OAuth2SecurityScheme = struct {
 // SecurityScheme union
 // ---------------------------------------------------------------------------
 
-pub const SecuritySchemeTag = enum { api_key, http_auth, oauth2, openid_connect, mtls };
+pub const SecuritySchemeTag = enum { api_key, http_auth, oauth2, openid_connect, mtls, unknown };
 
 pub const SecurityScheme = union(SecuritySchemeTag) {
     api_key: ApiKeySecurityScheme,
@@ -1313,6 +1325,8 @@ pub const SecurityScheme = union(SecuritySchemeTag) {
     oauth2: OAuth2SecurityScheme,
     openid_connect: OpenIdConnectSecurityScheme,
     mtls: MutualTlsSecurityScheme,
+    /// Forward-compat fallback for variants the local build doesn't recognize.
+    unknown: types.UnknownVariant,
 
     pub fn deinit(self: *SecurityScheme) void {
         switch (self.*) {
@@ -1322,30 +1336,36 @@ pub const SecurityScheme = union(SecuritySchemeTag) {
     }
 
     pub fn jsonStringify(self: SecurityScheme, jw: anytype) !void {
-        try jw.beginObject();
         switch (self) {
-            .api_key => |s| {
-                try jw.objectField("apiKeySecurityScheme");
-                try jw.write(s);
-            },
-            .http_auth => |s| {
-                try jw.objectField("httpAuthSecurityScheme");
-                try jw.write(s);
-            },
-            .oauth2 => |s| {
-                try jw.objectField("oauth2SecurityScheme");
-                try jw.write(s);
-            },
-            .openid_connect => |s| {
-                try jw.objectField("openIdConnectSecurityScheme");
-                try jw.write(s);
-            },
-            .mtls => |s| {
-                try jw.objectField("mtlsSecurityScheme");
-                try jw.write(s);
+            .unknown => |u| try jw.write(u),
+            else => {
+                try jw.beginObject();
+                switch (self) {
+                    .api_key => |s| {
+                        try jw.objectField("apiKeySecurityScheme");
+                        try jw.write(s);
+                    },
+                    .http_auth => |s| {
+                        try jw.objectField("httpAuthSecurityScheme");
+                        try jw.write(s);
+                    },
+                    .oauth2 => |s| {
+                        try jw.objectField("oauth2SecurityScheme");
+                        try jw.write(s);
+                    },
+                    .openid_connect => |s| {
+                        try jw.objectField("openIdConnectSecurityScheme");
+                        try jw.write(s);
+                    },
+                    .mtls => |s| {
+                        try jw.objectField("mtlsSecurityScheme");
+                        try jw.write(s);
+                    },
+                    .unknown => unreachable,
+                }
+                try jw.endObject();
             },
         }
-        try jw.endObject();
     }
 
     pub fn jsonParseFromValue(
@@ -1372,7 +1392,11 @@ pub const SecurityScheme = union(SecuritySchemeTag) {
         if (obj.get("mtlsSecurityScheme")) |v| {
             return .{ .mtls = try MutualTlsSecurityScheme.jsonParseFromValue(allocator, v, opts) };
         }
-        return error.UnknownSecuritySchemeVariant;
+        var it = obj.iterator();
+        if (it.next()) |entry| {
+            return .{ .unknown = try types.UnknownVariant.init(allocator, entry.key_ptr.*, entry.value_ptr.*) };
+        }
+        return error.UnexpectedToken;
     }
 };
 
@@ -1865,20 +1889,29 @@ test "security_scheme mtls serde" {
     try testing.expect(back == .mtls);
 }
 
-test "security_scheme unknown variant errors" {
+test "security_scheme unknown variant captured for forward compat" {
     const a = testing.allocator;
-    const parsed = try parseValueOwned(a, "{\"unknown\":{\"value\":true}}");
+    const parsed = try parseValueOwned(a, "{\"futureScheme\":{\"value\":true}}");
     defer parsed.deinit();
-    const result = SecurityScheme.jsonParseFromValue(a, parsed.value, .{});
-    try testing.expectError(error.UnknownSecuritySchemeVariant, result);
+    var ss = try SecurityScheme.jsonParseFromValue(a, parsed.value, .{});
+    defer ss.deinit();
+    try testing.expect(ss == .unknown);
+    try testing.expectEqualStrings("futureScheme", ss.unknown.key);
+
+    // Round-trip preserves the unknown payload.
+    const json = try std.json.Stringify.valueAlloc(a, ss, .{});
+    defer a.free(json);
+    try testing.expect(std.mem.indexOf(u8, json, "futureScheme") != null);
 }
 
-test "oauth_flows unknown variant errors" {
+test "oauth_flows unknown variant captured for forward compat" {
     const a = testing.allocator;
-    const parsed = try parseValueOwned(a, "{\"unknown\":{\"tokenUrl\":\"https://example.com/token\"}}");
+    const parsed = try parseValueOwned(a, "{\"deviceFlow2\":{\"tokenUrl\":\"https://example.com/token\"}}");
     defer parsed.deinit();
-    const result = OAuthFlows.jsonParseFromValue(a, parsed.value, .{});
-    try testing.expectError(error.UnknownOAuthFlowVariant, result);
+    var fl = try OAuthFlows.jsonParseFromValue(a, parsed.value, .{});
+    defer fl.deinit();
+    try testing.expect(fl == .unknown);
+    try testing.expectEqualStrings("deviceFlow2", fl.unknown.key);
 }
 
 test "oauth_flows authorization_code roundtrip" {

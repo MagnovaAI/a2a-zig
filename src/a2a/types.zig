@@ -193,6 +193,49 @@ pub const Metadata = struct {
     }
 };
 
+/// Payload for `unknown` union arms.
+///
+/// Externally-tagged unions whose variant set can grow over time carry an
+/// `unknown: UnknownVariant` arm so newer wire payloads don't crash older
+/// readers. The original tag key is preserved alongside the value, so the
+/// payload round-trips losslessly.
+pub const UnknownVariant = struct {
+    key: []const u8,
+    value: std.json.Value,
+    arena: *std.heap.ArenaAllocator,
+    allocator: std.mem.Allocator,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        key: []const u8,
+        value: std.json.Value,
+    ) !UnknownVariant {
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer {
+            arena.deinit();
+            allocator.destroy(arena);
+        }
+        const aa = arena.allocator();
+        const k = try aa.dupe(u8, key);
+        const v = try errors.cloneJsonValue(aa, value);
+        return .{ .key = k, .value = v, .arena = arena, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *UnknownVariant) void {
+        self.arena.deinit();
+        self.allocator.destroy(self.arena);
+        self.* = undefined;
+    }
+
+    pub fn jsonStringify(self: UnknownVariant, jw: anytype) !void {
+        try jw.beginObject();
+        try jw.objectField(self.key);
+        try jw.write(self.value);
+        try jw.endObject();
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Part
 // ---------------------------------------------------------------------------

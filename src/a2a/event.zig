@@ -171,13 +171,15 @@ pub const TaskArtifactUpdateEvent = struct {
 // StreamResponse — externally-tagged 4-variant union
 // ---------------------------------------------------------------------------
 
-pub const StreamResponseTag = enum { task, message, status_update, artifact_update };
+pub const StreamResponseTag = enum { task, message, status_update, artifact_update, unknown };
 
 pub const StreamResponse = union(StreamResponseTag) {
     task: Task,
     message: Message,
     status_update: TaskStatusUpdateEvent,
     artifact_update: TaskArtifactUpdateEvent,
+    /// Forward-compat fallback for variants the local build doesn't recognize.
+    unknown: types.UnknownVariant,
 
     pub fn deinit(self: *StreamResponse) void {
         switch (self.*) {
@@ -185,31 +187,38 @@ pub const StreamResponse = union(StreamResponseTag) {
             .message => |*m| m.deinit(),
             .status_update => |*s| s.deinit(),
             .artifact_update => |*a| a.deinit(),
+            .unknown => |*u| u.deinit(),
         }
         self.* = undefined;
     }
 
     pub fn jsonStringify(self: StreamResponse, jw: anytype) !void {
-        try jw.beginObject();
         switch (self) {
-            .task => |t| {
-                try jw.objectField("task");
-                try jw.write(t);
-            },
-            .message => |m| {
-                try jw.objectField("message");
-                try jw.write(m);
-            },
-            .status_update => |s| {
-                try jw.objectField("statusUpdate");
-                try jw.write(s);
-            },
-            .artifact_update => |a| {
-                try jw.objectField("artifactUpdate");
-                try jw.write(a);
+            .unknown => |u| try jw.write(u),
+            else => {
+                try jw.beginObject();
+                switch (self) {
+                    .task => |t| {
+                        try jw.objectField("task");
+                        try jw.write(t);
+                    },
+                    .message => |m| {
+                        try jw.objectField("message");
+                        try jw.write(m);
+                    },
+                    .status_update => |s| {
+                        try jw.objectField("statusUpdate");
+                        try jw.write(s);
+                    },
+                    .artifact_update => |a| {
+                        try jw.objectField("artifactUpdate");
+                        try jw.write(a);
+                    },
+                    .unknown => unreachable,
+                }
+                try jw.endObject();
             },
         }
-        try jw.endObject();
     }
 
     pub fn jsonParseFromValue(
@@ -221,7 +230,6 @@ pub const StreamResponse = union(StreamResponseTag) {
             .object => |o| o,
             else => return error.UnexpectedToken,
         };
-        // Match Rust order: message → task → statusUpdate → artifactUpdate.
         if (obj.get("message")) |v| {
             return .{ .message = try Message.jsonParseFromValue(allocator, v, opts) };
         }
@@ -233,6 +241,12 @@ pub const StreamResponse = union(StreamResponseTag) {
         }
         if (obj.get("artifactUpdate")) |v| {
             return .{ .artifact_update = try TaskArtifactUpdateEvent.jsonParseFromValue(allocator, v, opts) };
+        }
+        // Forward-compat: capture the first key/value pair so unknown variants
+        // round-trip without dropping data.
+        var it = obj.iterator();
+        if (it.next()) |entry| {
+            return .{ .unknown = try types.UnknownVariant.init(allocator, entry.key_ptr.*, entry.value_ptr.*) };
         }
         return error.UnexpectedToken;
     }
@@ -341,12 +355,18 @@ test "stream_response artifact_update serde" {
     try testing.expect(back == .artifact_update);
 }
 
-test "stream_response unknown variant" {
+test "stream_response unknown variant captured for forward compat" {
     const a = testing.allocator;
-    const parsed = try parseValueOwned(a, "{\"unknown\": {}}");
+    const parsed = try parseValueOwned(a, "{\"futureEvent\": {\"value\": 42}}");
     defer parsed.deinit();
-    const result = StreamResponse.jsonParseFromValue(a, parsed.value, .{});
-    try testing.expectError(error.UnexpectedToken, result);
+    var sr = try StreamResponse.jsonParseFromValue(a, parsed.value, .{});
+    defer sr.deinit();
+    try testing.expect(sr == .unknown);
+    try testing.expectEqualStrings("futureEvent", sr.unknown.key);
+
+    const json = try std.json.Stringify.valueAlloc(a, sr, .{});
+    defer a.free(json);
+    try testing.expect(std.mem.indexOf(u8, json, "futureEvent") != null);
 }
 
 test "task_status_update_event with metadata" {
