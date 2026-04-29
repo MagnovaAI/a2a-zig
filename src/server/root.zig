@@ -10,6 +10,7 @@ pub const sse = @import("sse.zig");
 pub const jsonrpc = @import("jsonrpc.zig");
 pub const rest = @import("rest.zig");
 pub const tls = @import("tls.zig");
+pub const server = @import("server.zig");
 pub const task_store = struct {
     pub const store = @import("task_store/store.zig");
     pub const inmemory = @import("task_store/inmemory.zig");
@@ -47,6 +48,13 @@ pub const ExecutionManager = execution.ExecutionManager;
 pub const ExecutionEvent = execution.ExecutionEvent;
 pub const RequestHandler = handler.RequestHandler;
 pub const DefaultRequestHandler = handler.DefaultRequestHandler;
+pub const Server = server.Server;
+pub const ServerOptions = server.Options;
+pub const ServerBind = server.Bind;
+pub const ServerMounts = server.Mounts;
+pub const TlsConfig = tls.Config;
+pub const RestHandler = rest.Handler;
+pub const JsonRpcHandler = jsonrpc.Handler;
 
 test {
     _ = middleware;
@@ -62,4 +70,5 @@ test {
     _ = jsonrpc;
     _ = rest;
     _ = tls;
+    _ = server;
 }
