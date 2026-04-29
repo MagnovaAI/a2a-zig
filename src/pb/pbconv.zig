@@ -1933,6 +1933,144 @@ pub fn agentCardFromProto(
 }
 
 // ---------------------------------------------------------------------------
+// TaskStatusUpdateEvent
+// ---------------------------------------------------------------------------
+
+pub fn taskStatusUpdateEventToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.TaskStatusUpdateEvent,
+) !v1.TaskStatusUpdateEvent {
+    return .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .status = try taskStatusToProto(allocator, src.status),
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn taskStatusUpdateEventFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.TaskStatusUpdateEvent,
+) !a2a.TaskStatusUpdateEvent {
+    var status: a2a.TaskStatus = if (src.status) |s|
+        try taskStatusFromProto(allocator, s)
+    else
+        .{ .allocator = allocator };
+    errdefer status.deinit();
+
+    var out: a2a.TaskStatusUpdateEvent = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .status = status,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// TaskArtifactUpdateEvent
+// ---------------------------------------------------------------------------
+
+pub fn taskArtifactUpdateEventToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.TaskArtifactUpdateEvent,
+) !v1.TaskArtifactUpdateEvent {
+    return .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .artifact = try artifactToProto(allocator, src.artifact),
+        .append = src.append orelse false,
+        .last_chunk = src.last_chunk orelse false,
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn taskArtifactUpdateEventFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.TaskArtifactUpdateEvent,
+) !a2a.TaskArtifactUpdateEvent {
+    const artifact = if (src.artifact) |art|
+        try artifactFromProto(allocator, art)
+    else
+        a2a.Artifact{ .artifact_id = try allocator.dupe(u8, ""), .allocator = allocator };
+
+    var out: a2a.TaskArtifactUpdateEvent = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .artifact = artifact,
+        .append = src.append,
+        .last_chunk = src.last_chunk,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// SendMessageResponse (oneof: task | message)
+// ---------------------------------------------------------------------------
+
+pub fn sendMessageResponseToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.SendMessageResponse,
+) !v1.SendMessageResponse {
+    return switch (src) {
+        .task => |t| .{ .payload = .{ .task = try taskToProto(allocator, t) } },
+        .message => |m| .{ .payload = .{ .message = try messageToProto(allocator, m) } },
+    };
+}
+
+pub fn sendMessageResponseFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.SendMessageResponse,
+) !a2a.SendMessageResponse {
+    const p = src.payload orelse return error.InvalidTimestamp;
+    return switch (p) {
+        .task => |t| .{ .task = try taskFromProto(allocator, t) },
+        .message => |m| .{ .message = try messageFromProto(allocator, m) },
+    };
+}
+
+// ---------------------------------------------------------------------------
+// StreamResponse (oneof: task | message | status_update | artifact_update)
+//
+// Native carries an extra `unknown` arm for forward-compat. There's no proto
+// representation for unknown variants so we drop them when serializing — the
+// JSON wire path preserves the original payload.
+// ---------------------------------------------------------------------------
+
+pub fn streamResponseToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.StreamResponse,
+) !v1.StreamResponse {
+    var payload: ?v1.StreamResponse.payload_union = null;
+    switch (src) {
+        .task => |t| payload = .{ .task = try taskToProto(allocator, t) },
+        .message => |m| payload = .{ .message = try messageToProto(allocator, m) },
+        .status_update => |s| payload = .{ .status_update = try taskStatusUpdateEventToProto(allocator, s) },
+        .artifact_update => |a| payload = .{ .artifact_update = try taskArtifactUpdateEventToProto(allocator, a) },
+        .unknown => payload = null,
+    }
+    return .{ .payload = payload };
+}
+
+pub fn streamResponseFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.StreamResponse,
+) !a2a.StreamResponse {
+    const p = src.payload orelse return error.InvalidTimestamp;
+    return switch (p) {
+        .task => |t| .{ .task = try taskFromProto(allocator, t) },
+        .message => |m| .{ .message = try messageFromProto(allocator, m) },
+        .status_update => |s| .{ .status_update = try taskStatusUpdateEventFromProto(allocator, s) },
+        .artifact_update => |a| .{ .artifact_update = try taskArtifactUpdateEventFromProto(allocator, a) },
+    };
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -2804,6 +2942,130 @@ test "agent card minimal round-trips" {
     try testing.expectEqual(@as(?bool, true), back.capabilities.streaming);
     try testing.expectEqual(@as(usize, 1), back.supported_interfaces.len);
     try testing.expectEqualStrings("JSONRPC", back.supported_interfaces[0].protocol_binding);
+}
+
+test "task status update event round-trips" {
+    const a = testing.allocator;
+    var native = a2a.TaskStatusUpdateEvent{
+        .task_id = try a.dupe(u8, "t1"),
+        .context_id = try a.dupe(u8, "c1"),
+        .status = .{ .state = .working, .allocator = a },
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try taskStatusUpdateEventToProto(a, native);
+    defer proto.deinit(a);
+    var back = try taskStatusUpdateEventFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.task_id);
+    try testing.expectEqual(a2a.TaskState.working, back.status.state);
+}
+
+test "task artifact update event round-trips" {
+    const a = testing.allocator;
+    const parts = try a.alloc(a2a.Part, 1);
+    parts[0] = try a2a.Part.text(a, "chunk");
+    var native = a2a.TaskArtifactUpdateEvent{
+        .task_id = try a.dupe(u8, "t1"),
+        .context_id = try a.dupe(u8, "c1"),
+        .artifact = .{
+            .artifact_id = try a.dupe(u8, "a1"),
+            .parts = parts,
+            .allocator = a,
+        },
+        .append = true,
+        .last_chunk = false,
+        .allocator = a,
+    };
+    defer native.deinit();
+    var proto = try taskArtifactUpdateEventToProto(a, native);
+    defer proto.deinit(a);
+    var back = try taskArtifactUpdateEventFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("a1", back.artifact.artifact_id);
+    try testing.expectEqual(@as(?bool, true), back.append);
+    try testing.expectEqual(@as(?bool, false), back.last_chunk);
+}
+
+test "send message response task variant round-trips" {
+    const a = testing.allocator;
+    var task = a2a.Task{
+        .id = try a.dupe(u8, "t1"),
+        .context_id = try a.dupe(u8, "c1"),
+        .status = .{ .state = .completed, .allocator = a },
+        .allocator = a,
+    };
+    var native = a2a.SendMessageResponse{ .task = task };
+    defer native.deinit();
+    _ = &task;
+
+    var proto = try sendMessageResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expect(proto.payload.? == .task);
+
+    var back = try sendMessageResponseFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back == .task);
+    try testing.expectEqualStrings("t1", back.task.id);
+}
+
+test "send message response message variant round-trips" {
+    const a = testing.allocator;
+    const parts = try a.alloc(a2a.Part, 1);
+    parts[0] = try a2a.Part.text(a, "hi");
+    var native = a2a.SendMessageResponse{ .message = try a2a.Message.init(a, .agent, parts) };
+    defer native.deinit();
+
+    var proto = try sendMessageResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expect(proto.payload.? == .message);
+
+    var back = try sendMessageResponseFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back == .message);
+}
+
+test "stream response status_update round-trips" {
+    const a = testing.allocator;
+    var native = a2a.StreamResponse{
+        .status_update = .{
+            .task_id = try a.dupe(u8, "t1"),
+            .context_id = try a.dupe(u8, "c1"),
+            .status = .{ .state = .working, .allocator = a },
+            .allocator = a,
+        },
+    };
+    defer native.deinit();
+
+    var proto = try streamResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expect(proto.payload.? == .status_update);
+
+    var back = try streamResponseFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back == .status_update);
+}
+
+test "stream response unknown arm drops on the proto wire" {
+    const a = testing.allocator;
+    const arena = try a.create(std.heap.ArenaAllocator);
+    arena.* = std.heap.ArenaAllocator.init(a);
+    const aa = arena.allocator();
+    var obj: std.json.ObjectMap = .empty;
+    try obj.put(aa, try aa.dupe(u8, "key"), .{ .integer = 1 });
+    var native = a2a.StreamResponse{
+        .unknown = .{
+            .key = try aa.dupe(u8, "futureEvent"),
+            .value = .{ .object = obj },
+            .arena = arena,
+            .allocator = a,
+        },
+    };
+    defer native.deinit();
+
+    var proto = try streamResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expect(proto.payload == null);
 }
 
 test "task wire round-trip via protobuf bytes" {
