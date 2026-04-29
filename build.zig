@@ -18,6 +18,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const broadcast_mod = b.addModule("broadcast", .{
+        .root_source_file = b.path("lib/broadcast/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Date/time library (rockorager/zeit). RFC 3339, ISO 8601, full TZ support.
     const zeit_dep = b.dependency("zeit", .{ .target = target, .optimize = optimize });
     const zeit_mod = zeit_dep.module("zeit");
@@ -93,6 +99,7 @@ pub fn build(b: *std.Build) void {
     server_mod.addImport("a2a", a2a_mod);
     server_mod.addImport("pb", pb_mod);
     server_mod.addImport("sse", sse_mod);
+    server_mod.addImport("broadcast", broadcast_mod);
     server_mod.addImport("httpz", httpz_mod);
     server_mod.addImport("tls", tls_mod);
 
@@ -144,6 +151,9 @@ pub fn build(b: *std.Build) void {
 
     const sse_tests = b.addTest(.{ .root_module = sse_mod });
     test_step.dependOn(&b.addRunArtifact(sse_tests).step);
+
+    const broadcast_tests = b.addTest(.{ .root_module = broadcast_mod });
+    test_step.dependOn(&b.addRunArtifact(broadcast_tests).step);
 
     const pb_tests = b.addTest(.{ .root_module = pb_mod });
     test_step.dependOn(&b.addRunArtifact(pb_tests).step);
