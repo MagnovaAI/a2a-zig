@@ -85,6 +85,7 @@ pub fn build(b: *std.Build) void {
     server_mod.addImport("a2a", a2a_mod);
 
     client_mod.addImport("pb", pb_mod);
+    client_mod.addImport("sse", sse_mod);
 
     // ---- CLI executable ----
     const cli_exe = b.addExecutable(.{

@@ -11,6 +11,7 @@ const std = @import("std");
 const a2a = @import("a2a");
 const pb = @import("pb");
 const transport = @import("transport.zig");
+const streaming = @import("streaming.zig");
 
 const ServiceParams = transport.ServiceParams;
 const Transport = transport.Transport;
@@ -238,12 +239,84 @@ pub const JsonRpcTransport = struct {
     }
 
     fn vtSendStreamingMessage(
-        _: *anyopaque,
-        _: std.mem.Allocator,
-        _: *const ServiceParams,
-        _: *const a2a.SendMessageRequest,
+        ctx: *anyopaque,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SendMessageRequest,
     ) Transport.Error!StreamIterator {
-        return Transport.Error.TransportError;
+        const self: *JsonRpcTransport = @ptrCast(@alignCast(ctx));
+        return self.streamingCall(
+            request_allocator,
+            params,
+            a2a.methods.SEND_STREAMING_MESSAGE,
+            req,
+            pb.v1.SendMessageRequest,
+            pb.conv.sendMessageRequestToProto,
+        ) catch |err| mapErr(err);
+    }
+
+    fn vtSubscribeToTask(
+        ctx: *anyopaque,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SubscribeToTaskRequest,
+    ) Transport.Error!StreamIterator {
+        const self: *JsonRpcTransport = @ptrCast(@alignCast(ctx));
+        return self.streamingCall(
+            request_allocator,
+            params,
+            a2a.methods.SUBSCRIBE_TO_TASK,
+            req,
+            pb.v1.SubscribeToTaskRequest,
+            pb.conv.subscribeToTaskRequestToProto,
+        ) catch |err| mapErr(err);
+    }
+
+    fn streamingCall(
+        self: *JsonRpcTransport,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        method: []const u8,
+        req: anytype,
+        comptime PbReq: type,
+        comptime toProto: fn (std.mem.Allocator, @TypeOf(req.*)) anyerror!PbReq,
+    ) RpcError!StreamIterator {
+        var pb_req = toProto(request_allocator, req.*) catch return RpcError.OutOfMemory;
+        defer pb_req.deinit(request_allocator);
+        const params_json = pb_req.jsonEncode(.{}, .{}, request_allocator) catch return RpcError.InvalidResponse;
+        defer request_allocator.free(params_json);
+
+        const id = self.newId(request_allocator) catch return RpcError.OutOfMemory;
+        defer request_allocator.free(id);
+        const body = buildEnvelope(request_allocator, id, method, params_json) catch return RpcError.OutOfMemory;
+        defer request_allocator.free(body);
+
+        // Streaming responses use `Accept: text/event-stream` plus the
+        // standard content-type for the request body.
+        var headers_list: std.array_list.Managed(std.http.Header) = .init(self.allocator);
+        defer headers_list.deinit();
+        headers_list.append(.{ .name = "Content-Type", .value = "application/json" }) catch return RpcError.OutOfMemory;
+        headers_list.append(.{ .name = "Accept", .value = "text/event-stream" }) catch return RpcError.OutOfMemory;
+        var it = params.entries.iterator();
+        while (it.next()) |entry| {
+            for (entry.value_ptr.*) |v| {
+                headers_list.append(.{ .name = entry.key_ptr.*, .value = v }) catch return RpcError.OutOfMemory;
+            }
+        }
+
+        const bytes = streaming.fetchResponseBytes(request_allocator, &self.client, .{
+            .method = .POST,
+            .url = self.endpoint,
+            .headers = headers_list.items,
+            .payload = body,
+            .max_bytes = self.max_response_bytes,
+        }) catch |err| return mapStreamingFetchErr(err);
+
+        const cursor = streaming.Cursor.create(request_allocator, bytes, .json_rpc) catch {
+            request_allocator.free(bytes);
+            return RpcError.OutOfMemory;
+        };
+        return cursor.iterator();
     }
 
     fn vtGetTask(
@@ -313,15 +386,6 @@ pub const JsonRpcTransport = struct {
         const parsed = try self.callTyped(pb.v1.CancelTaskRequest, pb.v1.Task, request_allocator, params, a2a.methods.CANCEL_TASK, pb_req);
         defer parsed.deinit();
         return pb.conv.taskFromProto(request_allocator, parsed.value) catch RpcError.OutOfMemory;
-    }
-
-    fn vtSubscribeToTask(
-        _: *anyopaque,
-        _: std.mem.Allocator,
-        _: *const ServiceParams,
-        _: *const a2a.SubscribeToTaskRequest,
-    ) Transport.Error!StreamIterator {
-        return Transport.Error.TransportError;
     }
 
     fn vtCreatePushConfig(
@@ -487,6 +551,15 @@ fn mapErr(err: RpcError) Transport.Error {
         error.UnexpectedToken => Transport.Error.UnexpectedToken,
         error.MissingField => Transport.Error.MissingField,
         else => Transport.Error.TransportError,
+    };
+}
+
+fn mapStreamingFetchErr(err: streaming.FetchError) RpcError {
+    return switch (err) {
+        error.OutOfMemory => RpcError.OutOfMemory,
+        error.HttpRequestFailed => RpcError.HttpRequestFailed,
+        error.HttpStatusError => RpcError.HttpStatusError,
+        error.ResponseTooLarge => RpcError.InvalidResponse,
     };
 }
 

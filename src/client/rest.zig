@@ -10,6 +10,7 @@ const std = @import("std");
 const a2a = @import("a2a");
 const pb = @import("pb");
 const transport = @import("transport.zig");
+const streaming = @import("streaming.zig");
 
 const ServiceParams = transport.ServiceParams;
 const Transport = transport.Transport;
@@ -188,12 +189,44 @@ pub const RestTransport = struct {
     }
 
     fn vtSendStreamingMessage(
-        _: *anyopaque,
-        _: std.mem.Allocator,
-        _: *const ServiceParams,
-        _: *const a2a.SendMessageRequest,
+        ctx: *anyopaque,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SendMessageRequest,
     ) Transport.Error!StreamIterator {
-        return Transport.Error.TransportError;
+        const self: *RestTransport = @ptrCast(@alignCast(ctx));
+        return self.sendStreamingMessageImpl(request_allocator, params, req) catch |err| mapErr(err);
+    }
+
+    fn sendStreamingMessageImpl(
+        self: *RestTransport,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SendMessageRequest,
+    ) RestError!StreamIterator {
+        var pb_req = pb.conv.sendMessageRequestToProto(request_allocator, req.*) catch return RestError.OutOfMemory;
+        defer pb_req.deinit(request_allocator);
+        const body = pb_req.jsonEncode(.{}, .{}, request_allocator) catch return RestError.InvalidResponse;
+        defer request_allocator.free(body);
+
+        const headers = self.buildHeaders(params, "text/event-stream") catch return RestError.OutOfMemory;
+        defer self.allocator.free(headers);
+        const url = self.buildUrl(STREAM_MESSAGE_PATH, &.{}) catch return RestError.OutOfMemory;
+        defer self.allocator.free(url);
+
+        const bytes = streaming.fetchResponseBytes(request_allocator, &self.client, .{
+            .method = .POST,
+            .url = url,
+            .headers = headers,
+            .payload = body,
+            .max_bytes = self.max_response_bytes,
+        }) catch |err| return mapStreamingFetchErr(err);
+
+        const cursor = streaming.Cursor.create(request_allocator, bytes, .raw_stream_response) catch {
+            request_allocator.free(bytes);
+            return RestError.OutOfMemory;
+        };
+        return cursor.iterator();
     }
 
     fn vtGetTask(
@@ -320,12 +353,45 @@ pub const RestTransport = struct {
     }
 
     fn vtSubscribeToTask(
-        _: *anyopaque,
-        _: std.mem.Allocator,
-        _: *const ServiceParams,
-        _: *const a2a.SubscribeToTaskRequest,
+        ctx: *anyopaque,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SubscribeToTaskRequest,
     ) Transport.Error!StreamIterator {
-        return Transport.Error.TransportError;
+        const self: *RestTransport = @ptrCast(@alignCast(ctx));
+        return self.subscribeToTaskImpl(request_allocator, params, req) catch |err| mapErr(err);
+    }
+
+    fn subscribeToTaskImpl(
+        self: *RestTransport,
+        request_allocator: std.mem.Allocator,
+        params: *const ServiceParams,
+        req: *const a2a.SubscribeToTaskRequest,
+    ) RestError!StreamIterator {
+        const path = std.fmt.allocPrint(
+            request_allocator,
+            "/tasks/{s}:subscribe",
+            .{req.id},
+        ) catch return RestError.OutOfMemory;
+        defer request_allocator.free(path);
+        const url = self.buildUrl(path, &.{}) catch return RestError.OutOfMemory;
+        defer self.allocator.free(url);
+        const headers = self.buildHeaders(params, "text/event-stream") catch return RestError.OutOfMemory;
+        defer self.allocator.free(headers);
+
+        const bytes = streaming.fetchResponseBytes(request_allocator, &self.client, .{
+            .method = .GET,
+            .url = url,
+            .headers = headers,
+            .payload = null,
+            .max_bytes = self.max_response_bytes,
+        }) catch |err| return mapStreamingFetchErr(err);
+
+        const cursor = streaming.Cursor.create(request_allocator, bytes, .raw_stream_response) catch {
+            request_allocator.free(bytes);
+            return RestError.OutOfMemory;
+        };
+        return cursor.iterator();
     }
 
     fn vtCreatePushConfig(
@@ -556,6 +622,15 @@ fn mapErr(err: RestError) Transport.Error {
         error.UnexpectedToken => Transport.Error.UnexpectedToken,
         error.MissingField => Transport.Error.MissingField,
         else => Transport.Error.TransportError,
+    };
+}
+
+fn mapStreamingFetchErr(err: streaming.FetchError) RestError {
+    return switch (err) {
+        error.OutOfMemory => RestError.OutOfMemory,
+        error.HttpRequestFailed => RestError.HttpRequestFailed,
+        error.HttpStatusError => RestError.HttpStatusError,
+        error.ResponseTooLarge => RestError.InvalidResponse,
     };
 }
 
