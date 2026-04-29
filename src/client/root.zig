@@ -8,6 +8,7 @@ pub const agent_card = @import("agent_card.zig");
 pub const factory = @import("factory.zig");
 pub const rest = @import("rest.zig");
 pub const jsonrpc = @import("jsonrpc.zig");
+pub const client = @import("client.zig");
 
 pub const Transport = transport.Transport;
 pub const TransportFactory = transport.TransportFactory;
@@ -26,6 +27,7 @@ pub const RestTransport = rest.RestTransport;
 pub const RestTransportFactory = rest.RestTransportFactory;
 pub const JsonRpcTransport = jsonrpc.JsonRpcTransport;
 pub const JsonRpcTransportFactory = jsonrpc.JsonRpcTransportFactory;
+pub const A2AClient = client.A2AClient;
 
 test {
     _ = transport;
@@ -35,4 +37,5 @@ test {
     _ = factory;
     _ = rest;
     _ = jsonrpc;
+    _ = client;
 }
