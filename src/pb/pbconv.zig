@@ -670,6 +670,209 @@ pub fn taskFromProto(allocator: std.mem.Allocator, src: v1.Task) !a2a.Task {
 }
 
 // ---------------------------------------------------------------------------
+// PushNotificationConfig + TaskPushNotificationConfig
+//
+// The proto flattens the native nested `{task_id, config: {url, id, ...}}`
+// shape into a single message with all fields at the top level. We
+// flatten/unflatten on the conversion boundary.
+// ---------------------------------------------------------------------------
+
+pub fn pushNotificationConfigToTaskProto(
+    allocator: std.mem.Allocator,
+    task_id: []const u8,
+    tenant: ?[]const u8,
+    src: a2a.PushNotificationConfig,
+) !v1.TaskPushNotificationConfig {
+    return .{
+        .tenant = try optStrToProto(allocator, tenant),
+        .id = try optStrToProto(allocator, src.id),
+        .task_id = try allocator.dupe(u8, task_id),
+        .url = try allocator.dupe(u8, src.url),
+        .token = try optStrToProto(allocator, src.token),
+        .authentication = if (src.authentication) |auth|
+            try authenticationInfoToProto(allocator, auth)
+        else
+            null,
+    };
+}
+
+pub fn taskPushNotificationConfigToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.TaskPushNotificationConfig,
+) !v1.TaskPushNotificationConfig {
+    return pushNotificationConfigToTaskProto(allocator, src.task_id, src.tenant, src.config);
+}
+
+pub fn taskPushNotificationConfigFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.TaskPushNotificationConfig,
+) !a2a.TaskPushNotificationConfig {
+    var cfg = a2a.PushNotificationConfig{
+        .url = try allocator.dupe(u8, src.url),
+        .allocator = allocator,
+    };
+    errdefer cfg.deinit();
+    if (try optStrFromProto(allocator, src.id)) |s| cfg.id = s;
+    if (try optStrFromProto(allocator, src.token)) |s| cfg.token = s;
+    if (src.authentication) |auth| cfg.authentication = try authenticationInfoFromProto(allocator, auth);
+
+    var out: a2a.TaskPushNotificationConfig = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .config = cfg,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Push notification request/response wrappers
+// ---------------------------------------------------------------------------
+
+pub fn createTaskPushNotificationConfigRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.CreateTaskPushNotificationConfigRequest,
+) !v1.TaskPushNotificationConfig {
+    return pushNotificationConfigToTaskProto(allocator, src.task_id, src.tenant, src.config);
+}
+
+pub fn createTaskPushNotificationConfigRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.TaskPushNotificationConfig,
+) !a2a.CreateTaskPushNotificationConfigRequest {
+    var cfg = a2a.PushNotificationConfig{
+        .url = try allocator.dupe(u8, src.url),
+        .allocator = allocator,
+    };
+    errdefer cfg.deinit();
+    if (try optStrFromProto(allocator, src.id)) |s| cfg.id = s;
+    if (try optStrFromProto(allocator, src.token)) |s| cfg.token = s;
+    if (src.authentication) |auth| cfg.authentication = try authenticationInfoFromProto(allocator, auth);
+
+    var out: a2a.CreateTaskPushNotificationConfigRequest = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .config = cfg,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+pub fn getTaskPushNotificationConfigRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.GetTaskPushNotificationConfigRequest,
+) !v1.GetTaskPushNotificationConfigRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .id = try allocator.dupe(u8, src.id),
+    };
+}
+
+pub fn getTaskPushNotificationConfigRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.GetTaskPushNotificationConfigRequest,
+) !a2a.GetTaskPushNotificationConfigRequest {
+    var out: a2a.GetTaskPushNotificationConfigRequest = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .id = try allocator.dupe(u8, src.id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+pub fn deleteTaskPushNotificationConfigRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.DeleteTaskPushNotificationConfigRequest,
+) !v1.DeleteTaskPushNotificationConfigRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .id = try allocator.dupe(u8, src.id),
+    };
+}
+
+pub fn deleteTaskPushNotificationConfigRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.DeleteTaskPushNotificationConfigRequest,
+) !a2a.DeleteTaskPushNotificationConfigRequest {
+    var out: a2a.DeleteTaskPushNotificationConfigRequest = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .id = try allocator.dupe(u8, src.id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    return out;
+}
+
+pub fn listTaskPushNotificationConfigsRequestToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.ListTaskPushNotificationConfigsRequest,
+) !v1.ListTaskPushNotificationConfigsRequest {
+    return .{
+        .tenant = try optStrToProto(allocator, src.tenant),
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .page_size = src.page_size orelse 0,
+        .page_token = try optStrToProto(allocator, src.page_token),
+    };
+}
+
+pub fn listTaskPushNotificationConfigsRequestFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ListTaskPushNotificationConfigsRequest,
+) !a2a.ListTaskPushNotificationConfigsRequest {
+    var out: a2a.ListTaskPushNotificationConfigsRequest = .{
+        .task_id = try allocator.dupe(u8, src.task_id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.tenant)) |s| out.tenant = s;
+    if (try optStrFromProto(allocator, src.page_token)) |s| out.page_token = s;
+    if (src.page_size > 0) out.page_size = src.page_size;
+    return out;
+}
+
+pub fn listTaskPushNotificationConfigsResponseToProto(
+    allocator: std.mem.Allocator,
+    src: a2a.ListTaskPushNotificationConfigsResponse,
+) !v1.ListTaskPushNotificationConfigsResponse {
+    var configs: std.ArrayList(v1.TaskPushNotificationConfig) = .empty;
+    try configs.ensureTotalCapacityPrecise(allocator, src.configs.len);
+    for (src.configs) |c| configs.appendAssumeCapacity(try taskPushNotificationConfigToProto(allocator, c));
+    return .{
+        .configs = configs,
+        .next_page_token = try optStrToProto(allocator, src.next_page_token),
+    };
+}
+
+pub fn listTaskPushNotificationConfigsResponseFromProto(
+    allocator: std.mem.Allocator,
+    src: v1.ListTaskPushNotificationConfigsResponse,
+) !a2a.ListTaskPushNotificationConfigsResponse {
+    const configs = try allocator.alloc(a2a.TaskPushNotificationConfig, src.configs.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (configs[0..i]) |*c| c.deinit();
+        allocator.free(configs);
+    }
+    while (i < src.configs.items.len) : (i += 1) {
+        configs[i] = try taskPushNotificationConfigFromProto(allocator, src.configs.items[i]);
+    }
+    var out: a2a.ListTaskPushNotificationConfigsResponse = .{
+        .configs = configs,
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.next_page_token)) |s| out.next_page_token = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -947,6 +1150,150 @@ test "task with status, artifacts, and history round-trips" {
     try testing.expectEqual(@as(usize, 1), back.artifacts.?.len);
     try testing.expect(back.history != null);
     try testing.expectEqual(@as(usize, 1), back.history.?.len);
+}
+
+test "task push notification config round-trips" {
+    const a = testing.allocator;
+    var native = a2a.TaskPushNotificationConfig{
+        .task_id = try a.dupe(u8, "t1"),
+        .config = .{
+            .url = try a.dupe(u8, "https://example.com/hook"),
+            .id = try a.dupe(u8, "cfg1"),
+            .token = try a.dupe(u8, "tok-123"),
+            .authentication = .{
+                .scheme = try a.dupe(u8, "Bearer"),
+                .credentials = try a.dupe(u8, "secret"),
+                .allocator = a,
+            },
+            .allocator = a,
+        },
+        .tenant = try a.dupe(u8, "tenant-1"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try taskPushNotificationConfigToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("t1", proto.task_id);
+    try testing.expectEqualStrings("cfg1", proto.id);
+    try testing.expectEqualStrings("https://example.com/hook", proto.url);
+
+    var back = try taskPushNotificationConfigFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.task_id);
+    try testing.expectEqualStrings("cfg1", back.config.id.?);
+    try testing.expectEqualStrings("https://example.com/hook", back.config.url);
+    try testing.expectEqualStrings("Bearer", back.config.authentication.?.scheme);
+    try testing.expectEqualStrings("tenant-1", back.tenant.?);
+}
+
+test "create task push notification request round-trips" {
+    const a = testing.allocator;
+    var native = a2a.CreateTaskPushNotificationConfigRequest{
+        .task_id = try a.dupe(u8, "t1"),
+        .config = .{
+            .url = try a.dupe(u8, "https://example.com/hook"),
+            .allocator = a,
+        },
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try createTaskPushNotificationConfigRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try createTaskPushNotificationConfigRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.task_id);
+    try testing.expectEqualStrings("https://example.com/hook", back.config.url);
+}
+
+test "get task push notification request round-trips" {
+    const a = testing.allocator;
+    var native = a2a.GetTaskPushNotificationConfigRequest{
+        .task_id = try a.dupe(u8, "t1"),
+        .id = try a.dupe(u8, "cfg1"),
+        .tenant = try a.dupe(u8, "tenant-1"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try getTaskPushNotificationConfigRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try getTaskPushNotificationConfigRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.task_id);
+    try testing.expectEqualStrings("cfg1", back.id);
+    try testing.expectEqualStrings("tenant-1", back.tenant.?);
+}
+
+test "delete task push notification request round-trips" {
+    const a = testing.allocator;
+    var native = a2a.DeleteTaskPushNotificationConfigRequest{
+        .task_id = try a.dupe(u8, "t1"),
+        .id = try a.dupe(u8, "cfg1"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try deleteTaskPushNotificationConfigRequestToProto(a, native);
+    defer proto.deinit(a);
+
+    var back = try deleteTaskPushNotificationConfigRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.task_id);
+    try testing.expectEqualStrings("cfg1", back.id);
+}
+
+test "list task push notification request page params round-trip" {
+    const a = testing.allocator;
+    var native = a2a.ListTaskPushNotificationConfigsRequest{
+        .task_id = try a.dupe(u8, "t1"),
+        .page_size = 25,
+        .page_token = try a.dupe(u8, "tok"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try listTaskPushNotificationConfigsRequestToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(i32, 25), proto.page_size);
+    try testing.expectEqualStrings("tok", proto.page_token);
+
+    var back = try listTaskPushNotificationConfigsRequestFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(@as(?i32, 25), back.page_size);
+    try testing.expectEqualStrings("tok", back.page_token.?);
+}
+
+test "list task push notification response round-trips" {
+    const a = testing.allocator;
+    const configs = try a.alloc(a2a.TaskPushNotificationConfig, 1);
+    configs[0] = .{
+        .task_id = try a.dupe(u8, "t1"),
+        .config = .{
+            .url = try a.dupe(u8, "https://example.com/hook"),
+            .allocator = a,
+        },
+        .allocator = a,
+    };
+    var native = a2a.ListTaskPushNotificationConfigsResponse{
+        .configs = configs,
+        .next_page_token = try a.dupe(u8, "next"),
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try listTaskPushNotificationConfigsResponseToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqual(@as(usize, 1), proto.configs.items.len);
+    try testing.expectEqualStrings("next", proto.next_page_token);
+
+    var back = try listTaskPushNotificationConfigsResponseFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(@as(usize, 1), back.configs.len);
+    try testing.expectEqualStrings("next", back.next_page_token.?);
 }
 
 test "task wire round-trip via protobuf bytes" {
