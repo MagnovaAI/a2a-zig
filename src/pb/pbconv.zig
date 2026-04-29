@@ -431,6 +431,245 @@ pub fn authenticationInfoFromProto(
 }
 
 // ---------------------------------------------------------------------------
+// Part (oneof content)
+// ---------------------------------------------------------------------------
+
+pub fn partToProto(allocator: std.mem.Allocator, src: a2a.Part) !v1.Part {
+    var content: ?v1.Part.content_union = null;
+    errdefer if (content) |*c| switch (c.*) {
+        .text => |s| allocator.free(s),
+        .raw => |b| allocator.free(b),
+        .url => |s| allocator.free(s),
+        .data => |*v| v.deinit(allocator),
+    };
+    switch (src.content) {
+        .text => |s| content = .{ .text = try allocator.dupe(u8, s) },
+        .raw => |b| content = .{ .raw = try allocator.dupe(u8, b) },
+        .url => |s| content = .{ .url = try allocator.dupe(u8, s) },
+        .data => |d| content = .{ .data = try jsonToProtoValue(allocator, d.value) },
+    }
+    return .{
+        .content = content,
+        .filename = try optStrToProto(allocator, src.filename),
+        .media_type = try optStrToProto(allocator, src.media_type),
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn partFromProto(allocator: std.mem.Allocator, src: v1.Part) !a2a.Part {
+    var part: a2a.Part = undefined;
+    part.allocator = allocator;
+    part.filename = null;
+    part.media_type = null;
+    part.metadata = null;
+
+    if (src.content) |c| switch (c) {
+        .text => |s| part.content = .{ .text = try allocator.dupe(u8, s) },
+        .raw => |b| part.content = .{ .raw = try allocator.dupe(u8, b) },
+        .url => |s| part.content = .{ .url = try allocator.dupe(u8, s) },
+        .data => |v| {
+            const arena = try allocator.create(std.heap.ArenaAllocator);
+            arena.* = std.heap.ArenaAllocator.init(allocator);
+            errdefer {
+                arena.deinit();
+                allocator.destroy(arena);
+            }
+            const cloned = try protoValueToJson(arena.allocator(), v);
+            part.content = .{ .data = .{ .value = cloned, .arena = arena } };
+        },
+    } else {
+        // No oneof set on the wire — collapse to an empty text part. Matches
+        // the Rust converter's behavior.
+        part.content = .{ .text = try allocator.dupe(u8, "") };
+    }
+    errdefer part.content.deinit(allocator);
+
+    if (try optStrFromProto(allocator, src.filename)) |s| part.filename = s;
+    if (try optStrFromProto(allocator, src.media_type)) |s| part.media_type = s;
+    if (try metadataFromProto(allocator, src.metadata)) |m| part.metadata = m;
+    return part;
+}
+
+fn partsToProto(allocator: std.mem.Allocator, src: []const a2a.Part) !std.ArrayList(v1.Part) {
+    var out: std.ArrayList(v1.Part) = .empty;
+    try out.ensureTotalCapacityPrecise(allocator, src.len);
+    for (src) |p| out.appendAssumeCapacity(try partToProto(allocator, p));
+    return out;
+}
+
+fn partsFromProto(allocator: std.mem.Allocator, src: std.ArrayList(v1.Part)) ![]a2a.Part {
+    const out = try allocator.alloc(a2a.Part, src.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (out[0..i]) |*p| p.deinit();
+        allocator.free(out);
+    }
+    while (i < src.items.len) : (i += 1) out[i] = try partFromProto(allocator, src.items[i]);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Message
+// ---------------------------------------------------------------------------
+
+pub fn messageToProto(allocator: std.mem.Allocator, src: a2a.Message) !v1.Message {
+    return .{
+        .message_id = try allocator.dupe(u8, src.message_id),
+        .context_id = try optStrToProto(allocator, src.context_id),
+        .task_id = try optStrToProto(allocator, src.task_id),
+        .role = roleToProto(src.role),
+        .parts = try partsToProto(allocator, src.parts),
+        .metadata = try metadataToProto(allocator, src.metadata),
+        .extensions = try strListToProto(allocator, src.extensions),
+        .reference_task_ids = try strListToProto(allocator, src.reference_task_ids),
+    };
+}
+
+pub fn messageFromProto(allocator: std.mem.Allocator, src: v1.Message) !a2a.Message {
+    var out: a2a.Message = .{
+        .message_id = try allocator.dupe(u8, src.message_id),
+        .role = roleFromProto(src.role),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+
+    if (try optStrFromProto(allocator, src.context_id)) |s| out.context_id = s;
+    if (try optStrFromProto(allocator, src.task_id)) |s| out.task_id = s;
+    out.parts = try partsFromProto(allocator, src.parts);
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    if (try strListFromProto(allocator, src.extensions)) |arr| out.extensions = arr;
+    if (try strListFromProto(allocator, src.reference_task_ids)) |arr| out.reference_task_ids = arr;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// TaskStatus
+// ---------------------------------------------------------------------------
+
+pub fn taskStatusToProto(allocator: std.mem.Allocator, src: a2a.TaskStatus) !v1.TaskStatus {
+    return .{
+        .state = taskStateToProto(src.state),
+        .message = if (src.message) |m| try messageToProto(allocator, m) else null,
+        .timestamp = try timestampToProto(allocator, src.timestamp),
+    };
+}
+
+pub fn taskStatusFromProto(allocator: std.mem.Allocator, src: v1.TaskStatus) !a2a.TaskStatus {
+    var out: a2a.TaskStatus = .{
+        .state = taskStateFromProto(src.state),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (src.message) |m| out.message = try messageFromProto(allocator, m);
+    if (try timestampFromProto(allocator, src.timestamp)) |s| out.timestamp = s;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Artifact
+// ---------------------------------------------------------------------------
+
+pub fn artifactToProto(allocator: std.mem.Allocator, src: a2a.Artifact) !v1.Artifact {
+    return .{
+        .artifact_id = try allocator.dupe(u8, src.artifact_id),
+        .name = try optStrToProto(allocator, src.name),
+        .description = try optStrToProto(allocator, src.description),
+        .parts = try partsToProto(allocator, src.parts),
+        .metadata = try metadataToProto(allocator, src.metadata),
+        .extensions = try strListToProto(allocator, src.extensions),
+    };
+}
+
+pub fn artifactFromProto(allocator: std.mem.Allocator, src: v1.Artifact) !a2a.Artifact {
+    var out: a2a.Artifact = .{
+        .artifact_id = try allocator.dupe(u8, src.artifact_id),
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (try optStrFromProto(allocator, src.name)) |s| out.name = s;
+    if (try optStrFromProto(allocator, src.description)) |s| out.description = s;
+    out.parts = try partsFromProto(allocator, src.parts);
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    if (try strListFromProto(allocator, src.extensions)) |arr| out.extensions = arr;
+    return out;
+}
+
+fn artifactsToProto(allocator: std.mem.Allocator, src: ?[]a2a.Artifact) !std.ArrayList(v1.Artifact) {
+    var out: std.ArrayList(v1.Artifact) = .empty;
+    if (src) |arr| {
+        try out.ensureTotalCapacityPrecise(allocator, arr.len);
+        for (arr) |a| out.appendAssumeCapacity(try artifactToProto(allocator, a));
+    }
+    return out;
+}
+
+fn artifactsFromProto(allocator: std.mem.Allocator, src: std.ArrayList(v1.Artifact)) !?[]a2a.Artifact {
+    if (src.items.len == 0) return null;
+    const out = try allocator.alloc(a2a.Artifact, src.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (out[0..i]) |*a| a.deinit();
+        allocator.free(out);
+    }
+    while (i < src.items.len) : (i += 1) out[i] = try artifactFromProto(allocator, src.items[i]);
+    return out;
+}
+
+fn historyToProto(allocator: std.mem.Allocator, src: ?[]a2a.Message) !std.ArrayList(v1.Message) {
+    var out: std.ArrayList(v1.Message) = .empty;
+    if (src) |arr| {
+        try out.ensureTotalCapacityPrecise(allocator, arr.len);
+        for (arr) |m| out.appendAssumeCapacity(try messageToProto(allocator, m));
+    }
+    return out;
+}
+
+fn historyFromProto(allocator: std.mem.Allocator, src: std.ArrayList(v1.Message)) !?[]a2a.Message {
+    if (src.items.len == 0) return null;
+    const out = try allocator.alloc(a2a.Message, src.items.len);
+    var i: usize = 0;
+    errdefer {
+        for (out[0..i]) |*m| m.deinit();
+        allocator.free(out);
+    }
+    while (i < src.items.len) : (i += 1) out[i] = try messageFromProto(allocator, src.items[i]);
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Task
+// ---------------------------------------------------------------------------
+
+pub fn taskToProto(allocator: std.mem.Allocator, src: a2a.Task) !v1.Task {
+    return .{
+        .id = try allocator.dupe(u8, src.id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .status = try taskStatusToProto(allocator, src.status),
+        .artifacts = try artifactsToProto(allocator, src.artifacts),
+        .history = try historyToProto(allocator, src.history),
+        .metadata = try metadataToProto(allocator, src.metadata),
+    };
+}
+
+pub fn taskFromProto(allocator: std.mem.Allocator, src: v1.Task) !a2a.Task {
+    var out: a2a.Task = .{
+        .id = try allocator.dupe(u8, src.id),
+        .context_id = try allocator.dupe(u8, src.context_id),
+        .status = .{ .allocator = allocator },
+        .allocator = allocator,
+    };
+    errdefer out.deinit();
+    if (src.status) |st| {
+        out.status.deinit();
+        out.status = try taskStatusFromProto(allocator, st);
+    }
+    if (try artifactsFromProto(allocator, src.artifacts)) |arr| out.artifacts = arr;
+    if (try historyFromProto(allocator, src.history)) |arr| out.history = arr;
+    if (try metadataFromProto(allocator, src.metadata)) |m| out.metadata = m;
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
 
@@ -539,4 +778,201 @@ test "authentication info empty credentials becomes null" {
     var back = try authenticationInfoFromProto(a, proto_mut);
     defer back.deinit();
     try testing.expect(back.credentials == null);
+}
+
+test "part text round-trips through proto" {
+    const a = testing.allocator;
+    var native = try a2a.Part.text(a, "hello");
+    defer native.deinit();
+    var proto = try partToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("hello", proto.content.?.text);
+    var back = try partFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("hello", back.content.text);
+}
+
+test "part raw bytes round-trip" {
+    const a = testing.allocator;
+    var native = try a2a.Part.raw(a, &[_]u8{ 1, 2, 3, 4, 5 });
+    defer native.deinit();
+    var proto = try partToProto(a, native);
+    defer proto.deinit(a);
+    var back = try partFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualSlices(u8, &[_]u8{ 1, 2, 3, 4, 5 }, back.content.raw);
+}
+
+test "part url with media type round-trips" {
+    const a = testing.allocator;
+    var native = try a2a.Part.url(a, "https://example.com/file.pdf");
+    defer native.deinit();
+    try native.withMediaType("application/pdf");
+    var proto = try partToProto(a, native);
+    defer proto.deinit(a);
+    var back = try partFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("https://example.com/file.pdf", back.content.url);
+    try testing.expectEqualStrings("application/pdf", back.media_type.?);
+}
+
+test "part data round-trips through proto value" {
+    const a = testing.allocator;
+    const arena = try a.create(std.heap.ArenaAllocator);
+    arena.* = std.heap.ArenaAllocator.init(a);
+    const aa = arena.allocator();
+    var obj: std.json.ObjectMap = .empty;
+    try obj.put(aa, try aa.dupe(u8, "k"), .{ .integer = 7 });
+    var native = a2a.Part.data(a, .{ .object = obj }, arena);
+    defer native.deinit();
+
+    var proto = try partToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expect(proto.content.? == .data);
+
+    var back = try partFromProto(a, proto);
+    defer back.deinit();
+    try testing.expect(back.content == .data);
+    try testing.expectEqual(@as(i64, 7), back.content.data.value.object.get("k").?.integer);
+}
+
+test "message with parts round-trips" {
+    const a = testing.allocator;
+    const parts = try a.alloc(a2a.Part, 1);
+    parts[0] = try a2a.Part.text(a, "hi");
+    var msg = try a2a.Message.init(a, .user, parts);
+    defer msg.deinit();
+
+    var proto = try messageToProto(a, msg);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings(msg.message_id, proto.message_id);
+    try testing.expectEqual(v1.Role.ROLE_USER, proto.role);
+    try testing.expectEqual(@as(usize, 1), proto.parts.items.len);
+
+    var back = try messageFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings(msg.message_id, back.message_id);
+    try testing.expectEqual(a2a.Role.user, back.role);
+    try testing.expectEqual(@as(usize, 1), back.parts.len);
+    try testing.expectEqualStrings("hi", back.parts[0].content.text);
+}
+
+test "task status with timestamp round-trips" {
+    const a = testing.allocator;
+    var st = a2a.TaskStatus{
+        .state = .working,
+        .timestamp = try a.dupe(u8, "2026-04-29T12:34:56.789Z"),
+        .allocator = a,
+    };
+    defer st.deinit();
+
+    var proto = try taskStatusToProto(a, st);
+    defer proto.deinit(a);
+    try testing.expectEqual(v1.TaskState.TASK_STATE_WORKING, proto.state);
+    try testing.expect(proto.timestamp != null);
+
+    var back = try taskStatusFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqual(a2a.TaskState.working, back.state);
+    try testing.expectEqualStrings("2026-04-29T12:34:56.789Z", back.timestamp.?);
+}
+
+test "artifact round-trips" {
+    const a = testing.allocator;
+    const parts = try a.alloc(a2a.Part, 1);
+    parts[0] = try a2a.Part.text(a, "result");
+    var native = a2a.Artifact{
+        .artifact_id = try a.dupe(u8, "art1"),
+        .name = try a.dupe(u8, "output.txt"),
+        .parts = parts,
+        .allocator = a,
+    };
+    defer native.deinit();
+
+    var proto = try artifactToProto(a, native);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("art1", proto.artifact_id);
+    try testing.expectEqualStrings("output.txt", proto.name);
+
+    var back = try artifactFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("art1", back.artifact_id);
+    try testing.expectEqualStrings("output.txt", back.name.?);
+    try testing.expectEqual(@as(usize, 1), back.parts.len);
+}
+
+test "task with status, artifacts, and history round-trips" {
+    const a = testing.allocator;
+
+    const status_msg_parts = try a.alloc(a2a.Part, 1);
+    status_msg_parts[0] = try a2a.Part.text(a, "working");
+    const status_msg = try a2a.Message.init(a, .agent, status_msg_parts);
+
+    const arts = try a.alloc(a2a.Artifact, 1);
+    const art_parts = try a.alloc(a2a.Part, 1);
+    art_parts[0] = try a2a.Part.text(a, "artifact body");
+    arts[0] = a2a.Artifact{
+        .artifact_id = try a.dupe(u8, "a1"),
+        .parts = art_parts,
+        .allocator = a,
+    };
+
+    const hist = try a.alloc(a2a.Message, 1);
+    const hist_parts = try a.alloc(a2a.Part, 1);
+    hist_parts[0] = try a2a.Part.text(a, "do it");
+    hist[0] = try a2a.Message.init(a, .user, hist_parts);
+
+    var task = a2a.Task{
+        .id = try a.dupe(u8, "t1"),
+        .context_id = try a.dupe(u8, "c1"),
+        .status = .{ .state = .working, .message = status_msg, .allocator = a },
+        .artifacts = arts,
+        .history = hist,
+        .allocator = a,
+    };
+    defer task.deinit();
+
+    var proto = try taskToProto(a, task);
+    defer proto.deinit(a);
+    try testing.expectEqualStrings("t1", proto.id);
+    try testing.expectEqual(@as(usize, 1), proto.artifacts.items.len);
+    try testing.expectEqual(@as(usize, 1), proto.history.items.len);
+
+    var back = try taskFromProto(a, proto);
+    defer back.deinit();
+    try testing.expectEqualStrings("t1", back.id);
+    try testing.expectEqualStrings("c1", back.context_id);
+    try testing.expectEqual(a2a.TaskState.working, back.status.state);
+    try testing.expect(back.artifacts != null);
+    try testing.expectEqual(@as(usize, 1), back.artifacts.?.len);
+    try testing.expect(back.history != null);
+    try testing.expectEqual(@as(usize, 1), back.history.?.len);
+}
+
+test "task wire round-trip via protobuf bytes" {
+    const a = testing.allocator;
+    var task = a2a.Task{
+        .id = try a.dupe(u8, "t-wire"),
+        .context_id = try a.dupe(u8, "c-wire"),
+        .status = .{ .state = .completed, .allocator = a },
+        .allocator = a,
+    };
+    defer task.deinit();
+
+    var proto = try taskToProto(a, task);
+    defer proto.deinit(a);
+
+    var encoded: std.Io.Writer.Allocating = .init(a);
+    defer encoded.deinit();
+    try proto.encode(&encoded.writer, a);
+
+    var reader: std.Io.Reader = .fixed(encoded.written());
+    var decoded = try v1.Task.decode(&reader, a);
+    defer decoded.deinit(a);
+
+    var back = try taskFromProto(a, decoded);
+    defer back.deinit();
+    try testing.expectEqualStrings("t-wire", back.id);
+    try testing.expectEqualStrings("c-wire", back.context_id);
+    try testing.expectEqual(a2a.TaskState.completed, back.status.state);
 }

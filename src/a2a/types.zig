@@ -249,7 +249,7 @@ pub const PartContent = union(PartContentTag) {
     url: []const u8,
     data: struct { value: std.json.Value, arena: *std.heap.ArenaAllocator },
 
-    fn deinit(self: *PartContent, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *PartContent, allocator: std.mem.Allocator) void {
         switch (self.*) {
             .text, .url => |s| allocator.free(s),
             .raw => |b| allocator.free(b),
