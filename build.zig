@@ -12,6 +12,10 @@ pub fn build(b: *std.Build) void {
     });
     sysclock_mod.link_libc = true;
 
+    // Date/time library (rockorager/zeit). RFC 3339, ISO 8601, full TZ support.
+    const zeit_dep = b.dependency("zeit", .{ .target = target, .optimize = optimize });
+    const zeit_mod = zeit_dep.module("zeit");
+
     // Upstream UUID library (alexrios/uuid). Used directly — no wrapper.
     const uuid_dep = b.dependency("uuid", .{ .target = target, .optimize = optimize });
     const uuid_mod = uuid_dep.module("uuid");
@@ -35,6 +39,7 @@ pub fn build(b: *std.Build) void {
     });
     a2a_mod.addImport("uuid", uuid_mod);
     a2a_mod.addImport("sysclock", sysclock_mod);
+    a2a_mod.addImport("zeit", zeit_mod);
 
     const client_mod = b.addModule("a2a_client", .{
         .root_source_file = b.path("src/client/root.zig"),
@@ -92,6 +97,7 @@ pub fn build(b: *std.Build) void {
 
     const sysclock_tests = b.addTest(.{ .root_module = sysclock_mod });
     test_step.dependOn(&b.addRunArtifact(sysclock_tests).step);
+
 
     const a2a_tests = b.addTest(.{ .root_module = a2a_mod });
     test_step.dependOn(&b.addRunArtifact(a2a_tests).step);

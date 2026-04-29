@@ -16,5 +16,9 @@
             .url = "https://github.com/alexrios/uuid/archive/ac4752a42b01a798e87a4e21c7feb32c2f425dc0.tar.gz",
             .hash = "uuid-2.0.0-ZJ5KhqUyAQCmuZfMn6DUOueobfz7YmlJhjKtOdaSo1ZL",
         },
+        .zeit = .{
+            .url = "https://github.com/rockorager/zeit/archive/2a79678e05e4e82cd4efd4fd6b754dcf029c3a64.tar.gz",
+            .hash = "zeit-0.6.0-5I6bk7q6AgBdMJxze3D4l9ylQhkviQ_BX9FigDt13MFn",
+        },
     },
 }
