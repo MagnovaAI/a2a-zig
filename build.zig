@@ -16,6 +16,21 @@ pub fn build(b: *std.Build) void {
     const zeit_dep = b.dependency("zeit", .{ .target = target, .optimize = optimize });
     const zeit_mod = zeit_dep.module("zeit");
 
+    // Protobuf codec + codegen (Arwalk/zig-protobuf).
+    const protobuf_dep = b.dependency("protobuf", .{ .target = target, .optimize = optimize });
+    const protobuf_mod = protobuf_dep.module("protobuf");
+
+    // `zig build gen-proto` regenerates src/pb/gen/ from proto/a2a.proto.
+    // Generated files are checked in and treated as source; this step is only
+    // run when the .proto schema changes.
+    const gen_proto_step = b.step("gen-proto", "Regenerate protobuf bindings from proto/");
+    const protoc_step = @import("protobuf").RunProtocStep.create(protobuf_dep.builder, target, .{
+        .destination_directory = b.path("src/pb/gen"),
+        .source_files = &.{b.path("proto/a2a.proto")},
+        .include_directories = &.{b.path("proto")},
+    });
+    gen_proto_step.dependOn(&protoc_step.step);
+
     // Upstream UUID library (alexrios/uuid). Used directly — no wrapper.
     const uuid_dep = b.dependency("uuid", .{ .target = target, .optimize = optimize });
     const uuid_mod = uuid_dep.module("uuid");
@@ -40,6 +55,13 @@ pub fn build(b: *std.Build) void {
     a2a_mod.addImport("uuid", uuid_mod);
     a2a_mod.addImport("sysclock", sysclock_mod);
     a2a_mod.addImport("zeit", zeit_mod);
+
+    const pb_mod = b.addModule("pb", .{
+        .root_source_file = b.path("src/pb/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pb_mod.addImport("protobuf", protobuf_mod);
 
     const client_mod = b.addModule("a2a_client", .{
         .root_source_file = b.path("src/client/root.zig"),
@@ -97,6 +119,9 @@ pub fn build(b: *std.Build) void {
 
     const sysclock_tests = b.addTest(.{ .root_module = sysclock_mod });
     test_step.dependOn(&b.addRunArtifact(sysclock_tests).step);
+
+    const pb_tests = b.addTest(.{ .root_module = pb_mod });
+    test_step.dependOn(&b.addRunArtifact(pb_tests).step);
 
 
     const a2a_tests = b.addTest(.{ .root_module = a2a_mod });

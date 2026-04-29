@@ -20,5 +20,9 @@
             .url = "https://github.com/rockorager/zeit/archive/2a79678e05e4e82cd4efd4fd6b754dcf029c3a64.tar.gz",
             .hash = "zeit-0.6.0-5I6bk7q6AgBdMJxze3D4l9ylQhkviQ_BX9FigDt13MFn",
         },
+        .protobuf = .{
+            .url = "https://github.com/Arwalk/zig-protobuf/archive/1f6cb06156b3ff4f52f98bc14f829c0b8393a6fc.tar.gz",
+            .hash = "protobuf-5.0.0-0e82avKUKAAVwTWJzTIEZ14Fu0zC11_lElR8tE6H__y1",
+        },
     },
 }
