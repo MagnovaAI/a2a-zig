@@ -50,6 +50,7 @@ pub const newContextId = types.newContextId;
 pub const newMessageId = types.newMessageId;
 pub const newArtifactId = types.newArtifactId;
 pub const StreamResponse = event.StreamResponse;
+pub const StreamIterator = event.StreamIterator;
 pub const TaskStatusUpdateEvent = event.TaskStatusUpdateEvent;
 pub const TaskArtifactUpdateEvent = event.TaskArtifactUpdateEvent;
 pub const AgentCard = agent_card.AgentCard;

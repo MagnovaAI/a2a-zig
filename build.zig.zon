@@ -24,5 +24,13 @@
             .url = "https://github.com/Arwalk/zig-protobuf/archive/1f6cb06156b3ff4f52f98bc14f829c0b8393a6fc.tar.gz",
             .hash = "protobuf-5.0.0-0e82avKUKAAVwTWJzTIEZ14Fu0zC11_lElR8tE6H__y1",
         },
+        .httpz = .{
+            .url = "https://github.com/karlseguin/http.zig/archive/9529d10cb7ef2d9a56e2e8e859afddabf6badf5c.tar.gz",
+            .hash = "httpz-0.0.0-PNVzrBu9BwC__muOxHYDIFGgKbhmsNWQHitrR0BIweJY",
+        },
+        .tls = .{
+            .url = "https://github.com/ianic/tls.zig/archive/561cd3e5a88ec430d2021e2da19b6bee667e020d.tar.gz",
+            .hash = "tls-0.1.0-ER2e0kOpBQCRFI5ZJTlpYIKYTkYM5eNvBBkBf9MZteut",
+        },
     },
 }

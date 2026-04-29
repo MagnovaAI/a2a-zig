@@ -1,4 +1,6 @@
-//! Streaming event types for the A2A protocol.
+//! Streaming event types for the A2A protocol, plus the `StreamIterator`
+//! interface every transport implementation produces and every server
+//! executor returns.
 const std = @import("std");
 const types = @import("types.zig");
 
@@ -249,6 +251,44 @@ pub const StreamResponse = union(StreamResponseTag) {
             return .{ .unknown = try types.UnknownVariant.init(allocator, entry.key_ptr.*, entry.value_ptr.*) };
         }
         return error.UnexpectedToken;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// StreamIterator — pull-based async stream of `StreamResponse` events
+// ---------------------------------------------------------------------------
+
+/// Iterator over streamed `StreamResponse` values. Implementations own the
+/// stream state behind `ctx`; callers must `deinit` when done. Used by every
+/// transport (`Transport.sendStreamingMessage`, `Transport.subscribeToTask`)
+/// and by every server-side executor that emits a stream of events.
+pub const StreamIterator = struct {
+    pub const NextError = error{
+        OutOfMemory,
+        TransportError,
+        UnexpectedToken,
+        MissingField,
+        EndOfStream,
+    };
+
+    pub const VTable = struct {
+        /// Returns the next event, `null` when the stream is exhausted, or
+        /// an error on failure. Ownership of the returned event transfers to
+        /// the caller — caller must `deinit` it.
+        next: *const fn (ctx: *anyopaque) NextError!?StreamResponse,
+        deinit: *const fn (ctx: *anyopaque) void,
+    };
+
+    ctx: *anyopaque,
+    vtable: *const VTable,
+
+    pub fn next(self: *StreamIterator) NextError!?StreamResponse {
+        return self.vtable.next(self.ctx);
+    }
+
+    pub fn deinit(self: *StreamIterator) void {
+        self.vtable.deinit(self.ctx);
+        self.* = undefined;
     }
 };
 

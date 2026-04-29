@@ -74,41 +74,9 @@ pub const ServiceParams = struct {
     }
 };
 
-// ---------------------------------------------------------------------------
-// StreamIterator — async stream over StreamResponse
-// ---------------------------------------------------------------------------
-
-/// Iterator over streamed `StreamResponse` values. The transport implementation
-/// owns the stream state behind `ctx`; callers must `deinit` when done.
-pub const StreamIterator = struct {
-    pub const VTable = struct {
-        /// Returns the next event, `null` when the stream is exhausted, or an
-        /// `A2AError` on transport failure. Ownership of the returned event
-        /// transfers to the caller — caller must `deinit` it.
-        next: *const fn (ctx: *anyopaque) NextError!?a2a.StreamResponse,
-        deinit: *const fn (ctx: *anyopaque) void,
-    };
-
-    pub const NextError = error{
-        OutOfMemory,
-        TransportError,
-        UnexpectedToken,
-        MissingField,
-        EndOfStream,
-    };
-
-    ctx: *anyopaque,
-    vtable: *const VTable,
-
-    pub fn next(self: *StreamIterator) NextError!?a2a.StreamResponse {
-        return self.vtable.next(self.ctx);
-    }
-
-    pub fn deinit(self: *StreamIterator) void {
-        self.vtable.deinit(self.ctx);
-        self.* = undefined;
-    }
-};
+/// Re-export of the protocol-level `StreamIterator` (defined in `a2a.event`)
+/// so existing transport code keeps using `transport.StreamIterator`.
+pub const StreamIterator = a2a.StreamIterator;
 
 // ---------------------------------------------------------------------------
 // Transport vtable

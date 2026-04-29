@@ -26,6 +26,14 @@ pub fn build(b: *std.Build) void {
     const protobuf_dep = b.dependency("protobuf", .{ .target = target, .optimize = optimize });
     const protobuf_mod = protobuf_dep.module("protobuf");
 
+    // HTTP/1.1 server (karlseguin/http.zig).
+    const httpz_dep = b.dependency("httpz", .{ .target = target, .optimize = optimize });
+    const httpz_mod = httpz_dep.module("httpz");
+
+    // TLS 1.3 server (ianic/tls.zig).
+    const tls_dep = b.dependency("tls", .{ .target = target, .optimize = optimize });
+    const tls_mod = tls_dep.module("tls");
+
     // `zig build gen-proto` regenerates src/pb/gen/ from proto/a2a.proto.
     // Generated files are checked in and treated as source; this step is only
     // run when the .proto schema changes.
@@ -83,6 +91,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     server_mod.addImport("a2a", a2a_mod);
+    server_mod.addImport("pb", pb_mod);
+    server_mod.addImport("sse", sse_mod);
+    server_mod.addImport("httpz", httpz_mod);
+    server_mod.addImport("tls", tls_mod);
 
     client_mod.addImport("pb", pb_mod);
     client_mod.addImport("sse", sse_mod);
